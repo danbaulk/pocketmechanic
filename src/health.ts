@@ -166,6 +166,17 @@ export function getPartsByZone(vehicle: Vehicle, now: Date): ZoneGroup[] {
   return result
 }
 
+/**
+ * The single worst RAG across all of a vehicle's zones, or null if nothing is known yet.
+ * Backs the garage-bar per-car badge and the avatar's overall tint.
+ */
+export function vehicleWorstRag(vehicle: Vehicle, now: Date): RAG | null {
+  return getPartsByZone(vehicle, now).reduce<RAG | null>(
+    (worst, zone) => (zone.worstRag ? rankRag(zone.worstRag, worst) : worst),
+    null,
+  )
+}
+
 const RAG_RANK: Record<RAG, number> = { green: 0, amber: 1, red: 2 }
 function rankRag(candidate: RAG, current: RAG | null): RAG {
   if (current === null) return candidate

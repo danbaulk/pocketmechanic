@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest'
-import { computePartHealth, estimateCurrentMileage, getPartsByZone, getPartsWithHealth } from './health.ts'
+import {
+  computePartHealth,
+  estimateCurrentMileage,
+  getPartsByZone,
+  getPartsWithHealth,
+  vehicleWorstRag,
+} from './health.ts'
 import type { FittedPart, Vehicle } from './types.ts'
 import type { CataloguePart } from './data/partsCatalogue.ts'
 
@@ -160,5 +166,41 @@ describe('getPartsWithHealth', () => {
     const { known, needsInfo } = getPartsWithHealth(v, NOW)
     expect(known.map((k) => k.part.id)).toEqual(['b', 'a'])
     expect(needsInfo.map((k) => k.part.id)).toEqual(['c'])
+  })
+})
+
+describe('vehicleWorstRag', () => {
+  // avgAnnualMiles 0 + lastReadingDate = NOW's date → current mileage is exactly lastReadingMiles.
+  function vehicle(parts: Vehicle['parts']): Vehicle {
+    return {
+      id: 'v', make: 'A', model: 'B', year: 2018,
+      lastReadingMiles: 80_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 0,
+      parts,
+    }
+  }
+
+  it('is null when no part has recorded fitment', () => {
+    const v = vehicle([
+      { id: 'a', catalogueId: 'brake-pads-front', fitDate: null, fitMileage: null },
+      { id: 'b', catalogueId: 'wiper-blades', fitDate: null, fitMileage: null },
+    ])
+    expect(vehicleWorstRag(v, NOW)).toBeNull()
+  })
+
+  it('returns the worst RAG across every zone (red beats amber beats green)', () => {
+    const v = vehicle([
+      { id: 'oil', catalogueId: 'engine-oil', fitDate: '2026-06-01', fitMileage: 79_000 }, // green
+      { id: 'wipers', catalogueId: 'wiper-blades', fitDate: '2025-08-01', fitMileage: 0 }, // ~92% age → amber
+      { id: 'pads', catalogueId: 'brake-pads-front', fitDate: '2026-06-01', fitMileage: 45_000 }, // 35k/30k → red
+    ])
+    expect(vehicleWorstRag(v, NOW)).toBe('red')
+  })
+
+  it('ignores needs-info parts when ranking', () => {
+    const v = vehicle([
+      { id: 'wipers', catalogueId: 'wiper-blades', fitDate: '2025-08-01', fitMileage: 0 }, // ~92% age → amber
+      { id: 'pads', catalogueId: 'brake-pads-front', fitDate: null, fitMileage: null }, // needs info, ignored
+    ])
+    expect(vehicleWorstRag(v, NOW)).toBe('amber')
   })
 })

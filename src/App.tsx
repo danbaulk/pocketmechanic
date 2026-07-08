@@ -1,5 +1,6 @@
 import { useGarage } from './garageContext.ts'
 import { EmptyGarage } from './components/EmptyGarage.tsx'
+import { GarageBar } from './components/GarageBar.tsx'
 import { Dashboard } from './components/Dashboard.tsx'
 
 export function App() {
@@ -15,6 +16,7 @@ export function App() {
           <h1 className="text-lg font-semibold text-slate-900">PocketMechanic</h1>
         </div>
       </header>
+      {state.vehicles.length > 0 && <GarageBar />}
       <main className="mx-auto flex w-full max-w-lg flex-1 flex-col px-4 py-5">
         {active ? <Dashboard vehicle={active} /> : <EmptyGarage />}
       </main>
