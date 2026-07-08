@@ -1,16 +1,31 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { Vehicle } from '../types.ts'
+import type { PartZone } from '../data/partsCatalogue.ts'
 import { getPartsByZone, type ZoneGroup } from '../health.ts'
 import { RAG_STYLES } from '../rag.ts'
 import { PartRow } from './PartRow.tsx'
 import { AddPartForm } from './AddPartForm.tsx'
 
-export function PartsList({ vehicle }: { vehicle: Vehicle }) {
+/** A request to focus a zone's section. `n` changes on every tap so repeats re-trigger. */
+export type ZoneFocus = { zone: PartZone; n: number }
+
+export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFocus | null }) {
   const [adding, setAdding] = useState(false)
   const zones = getPartsByZone(vehicle, new Date())
 
   const redCount = zones.reduce((n, z) => n + z.redCount, 0)
   const amberCount = zones.reduce((n, z) => n + z.amberCount, 0)
+
+  // Scroll the tapped zone's section into view and briefly highlight it.
+  const sections = useRef(new Map<PartZone, HTMLDivElement | null>())
+  const [highlighted, setHighlighted] = useState<PartZone | null>(null)
+  useEffect(() => {
+    if (!focus) return
+    sections.current.get(focus.zone)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlighted(focus.zone)
+    const timer = setTimeout(() => setHighlighted(null), 1500)
+    return () => clearTimeout(timer)
+  }, [focus])
 
   return (
     <section className="space-y-4">
@@ -38,7 +53,15 @@ export function PartsList({ vehicle }: { vehicle: Vehicle }) {
           No parts on this car yet. Add one to start tracking its health.
         </p>
       ) : (
-        zones.map((zone) => <ZoneSection key={zone.zone} vehicle={vehicle} zone={zone} />)
+        zones.map((zone) => (
+          <ZoneSection
+            key={zone.zone}
+            vehicle={vehicle}
+            zone={zone}
+            highlighted={highlighted === zone.zone}
+            innerRef={(el) => sections.current.set(zone.zone, el)}
+          />
+        ))
       )}
 
       {adding && <AddPartForm vehicle={vehicle} onClose={() => setAdding(false)} />}
@@ -46,10 +69,25 @@ export function PartsList({ vehicle }: { vehicle: Vehicle }) {
   )
 }
 
-function ZoneSection({ vehicle, zone }: { vehicle: Vehicle; zone: ZoneGroup }) {
+function ZoneSection({
+  vehicle,
+  zone,
+  highlighted,
+  innerRef,
+}: {
+  vehicle: Vehicle
+  zone: ZoneGroup
+  highlighted: boolean
+  innerRef: (el: HTMLDivElement | null) => void
+}) {
   const dot = zone.worstRag ? RAG_STYLES[zone.worstRag].dot : 'bg-slate-300'
   return (
-    <div className="space-y-1.5">
+    <div
+      ref={innerRef}
+      className={`space-y-1.5 rounded-2xl transition-shadow ${
+        highlighted ? 'ring-2 ring-sky-400 ring-offset-2' : ''
+      }`}
+    >
       <div className="flex items-center gap-2 px-1">
         <span className={`h-2 w-2 rounded-full ${dot}`} aria-hidden />
         <h4 className="text-sm font-semibold text-slate-700">{zone.zone}</h4>

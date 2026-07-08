@@ -1,10 +1,17 @@
+import { useState } from 'react'
 import type { Vehicle } from '../types.ts'
+import type { PartZone } from '../data/partsCatalogue.ts'
 import { useGarage } from '../garageContext.ts'
+import { CarAvatar } from './CarAvatar.tsx'
+import { DueSoonest } from './DueSoonest.tsx'
 import { MileagePanel } from './MileagePanel.tsx'
-import { PartsList } from './PartsList.tsx'
+import { PartsList, type ZoneFocus } from './PartsList.tsx'
 
 export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
   const { dispatch } = useGarage()
+  // The `n` counter re-triggers the scroll even when the same zone is tapped twice.
+  const [focus, setFocus] = useState<ZoneFocus | null>(null)
+  const focusZone = (zone: PartZone) => setFocus((f) => ({ zone, n: (f?.n ?? 0) + 1 }))
 
   function remove() {
     if (confirm(`Remove ${vehicle.make} ${vehicle.model} and its history?`)) {
@@ -32,8 +39,10 @@ export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
           Remove car
         </button>
       </div>
+      <DueSoonest vehicle={vehicle} onFocusZone={focusZone} />
+      <CarAvatar vehicle={vehicle} onZoneClick={focusZone} />
       <MileagePanel vehicle={vehicle} />
-      <PartsList vehicle={vehicle} />
+      <PartsList vehicle={vehicle} focus={focus} />
     </div>
   )
 }
