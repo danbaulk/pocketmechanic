@@ -36,6 +36,7 @@ export const PART_CATALOGUE: CataloguePart[] = [
   { id: 'battery', name: '12V battery', zone: 'Engine bay', ageYears: 5, costLow: 80, costHigh: 200 },
   { id: 'alternator', name: 'Alternator', zone: 'Engine bay', mileageInterval: 100_000, ageYears: 12, costLow: 150, costHigh: 400 },
   { id: 'brake-fluid', name: 'Brake fluid', zone: 'Engine bay', ageYears: 2, costLow: 30, costHigh: 70 },
+  { id: 'ac-refrigerant', name: 'Air-con refrigerant', zone: 'Engine bay', ageYears: 2, costLow: 40, costHigh: 100 },
 
   // Front wheels
   { id: 'brake-pads-front', name: 'Front brake pads', zone: 'Front wheels', mileageInterval: 30_000, ageYears: 6, costLow: 40, costHigh: 120 },

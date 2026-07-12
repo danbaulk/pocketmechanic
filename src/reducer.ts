@@ -1,5 +1,6 @@
-import type { AppState, FittedPart, Vehicle } from './types.ts'
+import type { AppState, FittedPart, HistoryEntry, Vehicle } from './types.ts'
 import { PART_CATALOGUE } from './data/partsCatalogue.ts'
+import { originalFitment } from './health.ts'
 
 export function uid(): string {
   return crypto.randomUUID()
@@ -23,21 +24,36 @@ export type Action =
   | { type: 'setActiveVehicle'; id: string }
   | { type: 'recordReading'; vehicleId: string; miles: number; date: string }
   | { type: 'setPartFitment'; vehicleId: string; partId: string; fitDate: string; fitMileage: number }
+  | { type: 'replacePart'; vehicleId: string; partId: string; fitDate: string; fitMileage: number; note?: string }
+  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail' }
+  | { type: 'removeHistoryEntry'; vehicleId: string; entryId: string }
   | { type: 'addPart'; vehicleId: string; catalogueId: string; fitDate: string | null; fitMileage: number | null }
   | { type: 'removePart'; vehicleId: string; partId: string }
 
-/** A fresh vehicle is pre-populated with every catalogue part, awaiting fitment. */
-function seedParts(): FittedPart[] {
+/**
+ * A fresh vehicle is pre-populated with every catalogue part, each assumed original
+ * (fitted from new) until the owner records an actual fit date.
+ */
+function seedParts(year: number): FittedPart[] {
   return PART_CATALOGUE.map((cat) => ({
     id: uid(),
     catalogueId: cat.id,
-    fitDate: null,
-    fitMileage: null,
+    ...originalFitment(year),
   }))
 }
 
 function updateVehicle(state: AppState, id: string, fn: (v: Vehicle) => Vehicle): AppState {
   return { ...state, vehicles: state.vehicles.map((v) => (v.id === id ? fn(v) : v)) }
+}
+
+/**
+ * Move the odometer anchor to a newly-logged reading, but only when it is at least as
+ * recent as the current anchor — so back-dating an event never drags the estimate
+ * backwards. ISO yyyy-mm-dd dates compare correctly as strings.
+ */
+function reAnchor(v: Vehicle, miles: number | null, date: string): Vehicle {
+  if (miles === null || date < v.lastReadingDate) return v
+  return { ...v, lastReadingMiles: miles, lastReadingDate: date }
 }
 
 export function garageReducer(state: AppState, action: Action): AppState {
@@ -53,7 +69,9 @@ export function garageReducer(state: AppState, action: Action): AppState {
         lastReadingMiles: n.currentMileage,
         lastReadingDate: n.currentDate,
         avgAnnualMiles: n.avgAnnualMiles,
-        parts: seedParts(),
+        parts: seedParts(n.year),
+        // Seed the timeline with the starting odometer reading.
+        history: [{ id: uid(), kind: 'reading', date: n.currentDate, mileage: n.currentMileage }],
       }
       return { ...state, vehicles: [...state.vehicles, vehicle], activeVehicleId: vehicle.id }
     }
@@ -72,11 +90,10 @@ export function garageReducer(state: AppState, action: Action): AppState {
       return { ...state, activeVehicleId: action.id }
 
     case 'recordReading':
-      return updateVehicle(state, action.vehicleId, (v) => ({
-        ...v,
-        lastReadingMiles: action.miles,
-        lastReadingDate: action.date,
-      }))
+      return updateVehicle(state, action.vehicleId, (v) => {
+        const entry: HistoryEntry = { id: uid(), kind: 'reading', date: action.date, mileage: action.miles }
+        return reAnchor({ ...v, history: [...v.history, entry] }, action.miles, action.date)
+      })
 
     case 'setPartFitment':
       return updateVehicle(state, action.vehicleId, (v) => ({
@@ -88,14 +105,52 @@ export function garageReducer(state: AppState, action: Action): AppState {
         ),
       }))
 
-    case 'addPart':
+    case 'replacePart':
+      return updateVehicle(state, action.vehicleId, (v) => {
+        const part = v.parts.find((p) => p.id === action.partId)
+        const entry: HistoryEntry = {
+          id: uid(),
+          kind: 'replacement',
+          date: action.fitDate,
+          mileage: action.fitMileage,
+          partId: action.partId,
+          ...(part ? { catalogueId: part.catalogueId } : {}),
+          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
+        }
+        const parts = v.parts.map((p) =>
+          p.id === action.partId ? { ...p, fitDate: action.fitDate, fitMileage: action.fitMileage } : p,
+        )
+        return reAnchor({ ...v, parts, history: [...v.history, entry] }, action.fitMileage, action.fitDate)
+      })
+
+    case 'addHistoryEntry':
+      return updateVehicle(state, action.vehicleId, (v) => {
+        const entry: HistoryEntry = {
+          id: uid(),
+          kind: action.kind,
+          date: action.date,
+          mileage: action.mileage,
+          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
+          ...(action.motResult ? { motResult: action.motResult } : {}),
+        }
+        return reAnchor({ ...v, history: [...v.history, entry] }, action.mileage, action.date)
+      })
+
+    case 'removeHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => ({
         ...v,
-        parts: [
-          ...v.parts,
-          { id: uid(), catalogueId: action.catalogueId, fitDate: action.fitDate, fitMileage: action.fitMileage },
-        ],
+        history: v.history.filter((h) => h.id !== action.entryId),
       }))
+
+    case 'addPart':
+      return updateVehicle(state, action.vehicleId, (v) => {
+        // An un-dated add is assumed original (fitted from new); otherwise use the supplied fitment.
+        const fitment =
+          action.fitDate === null || action.fitMileage === null
+            ? originalFitment(v.year)
+            : { fitDate: action.fitDate, fitMileage: action.fitMileage }
+        return { ...v, parts: [...v.parts, { id: uid(), catalogueId: action.catalogueId, ...fitment }] }
+      })
 
     case 'removePart':
       return updateVehicle(state, action.vehicleId, (v) => ({

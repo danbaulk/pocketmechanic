@@ -3,9 +3,8 @@ import type { Vehicle } from '../types.ts'
 import type { PartZone } from '../data/partsCatalogue.ts'
 import { useGarage } from '../garageContext.ts'
 import { CarAvatar } from './CarAvatar.tsx'
-import { DueSoonest } from './DueSoonest.tsx'
-import { MileagePanel } from './MileagePanel.tsx'
 import { PartsList, type ZoneFocus } from './PartsList.tsx'
+import { HistoryTimeline } from './HistoryTimeline.tsx'
 
 export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
   const { dispatch } = useGarage()
@@ -39,10 +38,9 @@ export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
           Remove car
         </button>
       </div>
-      <DueSoonest vehicle={vehicle} onFocusZone={focusZone} />
       <CarAvatar vehicle={vehicle} onZoneClick={focusZone} />
-      <MileagePanel vehicle={vehicle} />
       <PartsList vehicle={vehicle} focus={focus} />
+      <HistoryTimeline vehicle={vehicle} />
     </div>
   )
 }

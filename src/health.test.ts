@@ -47,6 +47,7 @@ describe('estimateCurrentMileage', () => {
       id: 'v', make: 'Ford', model: 'Focus', year: 2018,
       lastReadingMiles: 50_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 7305,
       parts: [],
+      history: [],
     }
     // 365 days later: 7305 * 365 / 365.25 = exactly 7300 miles.
     const oneYear = new Date('2027-07-04T00:00:00Z')
@@ -58,6 +59,7 @@ describe('estimateCurrentMileage', () => {
       id: 'v', make: 'A', model: 'B', year: 2020,
       lastReadingMiles: 50_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 8000,
       parts: [],
+      history: [],
     }
     const before = new Date('2026-01-01T00:00:00Z')
     expect(estimateCurrentMileage(v, before)).toBe(50_000)
@@ -135,6 +137,7 @@ describe('getPartsByZone', () => {
         { id: 'wipers', catalogueId: 'wiper-blades', fitDate: null, fitMileage: null }, // Windscreen, needs info
         { id: 'discs', catalogueId: 'brake-discs-front', fitDate: null, fitMileage: null }, // Front wheels, needs info
       ],
+      history: [],
     }
     const zones = getPartsByZone(v, NOW)
 
@@ -162,6 +165,7 @@ describe('getPartsWithHealth', () => {
         { id: 'c', catalogueId: 'brake-pads-front', fitDate: null, fitMileage: null }, // needs info
         { id: 'd', catalogueId: 'not-a-real-part', fitDate: '2026-01-01', fitMileage: 78_000 }, // dropped
       ],
+      history: [],
     }
     const { known, needsInfo } = getPartsWithHealth(v, NOW)
     expect(known.map((k) => k.part.id)).toEqual(['b', 'a'])
@@ -176,6 +180,7 @@ describe('vehicleWorstRag', () => {
       id: 'v', make: 'A', model: 'B', year: 2018,
       lastReadingMiles: 80_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 0,
       parts,
+      history: [],
     }
   }
 

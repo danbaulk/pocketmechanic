@@ -1,25 +1,79 @@
-import type { AppState } from './types.ts'
+import type { AppState, HistoryEntry, Vehicle } from './types.ts'
+import { originalFitment } from './health.ts'
 
 const STORAGE_KEY = 'pocketmechanic:state'
-const CURRENT_VERSION = 1 as const
+const CURRENT_VERSION = 2 as const
 
 export function defaultState(): AppState {
   return { version: CURRENT_VERSION, vehicles: [], activeVehicleId: null }
 }
 
+/** A loosely-typed stored blob mid-migration (older vehicles may predate `history`). */
+type StoredBlob = {
+  version: number
+  vehicles: (Omit<Vehicle, 'history'> & { history?: HistoryEntry[] })[]
+  activeVehicleId: string | null
+}
+
 /**
- * Validate/upgrade a parsed blob. No migrations exist yet, so an unknown version is
- * rejected (→ defaults); a current-version blob has its top-level shape checked and
- * its activeVehicleId healed if it points at a missing vehicle.
+ * Ordered migration steps keyed by the version they upgrade *from*; each returns a blob
+ * one version newer. Mirrors the pantry/aroundtheworld step-migrator pattern.
+ */
+const MIGRATIONS: Record<number, (blob: StoredBlob) => StoredBlob> = {
+  // v1 → v2: add the history timeline. Seed one `reading` entry from the vehicle's existing
+  // odometer anchor so pre-existing cars don't start with an empty timeline.
+  1: (blob) => ({
+    ...blob,
+    version: 2,
+    vehicles: blob.vehicles.map((v) => ({
+      ...v,
+      history: [
+        { id: crypto.randomUUID(), kind: 'reading', date: v.lastReadingDate, mileage: v.lastReadingMiles },
+      ],
+    })),
+  }),
+}
+
+function asStoredBlob(parsed: unknown): StoredBlob | null {
+  if (!parsed || typeof parsed !== 'object') return null
+  const c = parsed as Partial<StoredBlob>
+  if (typeof c.version !== 'number' || !Array.isArray(c.vehicles)) return null
+  return { version: c.version, vehicles: c.vehicles, activeVehicleId: c.activeVehicleId ?? null }
+}
+
+/** Run migration steps until the blob reaches CURRENT_VERSION, or null if there's no path. */
+function migrate(parsed: unknown): StoredBlob | null {
+  const blob = asStoredBlob(parsed)
+  if (!blob) return null
+  let current = blob
+  while (current.version < CURRENT_VERSION) {
+    const step = MIGRATIONS[current.version]
+    if (!step) return null // no migration path from this version
+    current = step(current)
+  }
+  if (current.version !== CURRENT_VERSION) return null // newer than we understand → reject
+  return current
+}
+
+/**
+ * Validate/upgrade a parsed blob: migrate older versions forward, heal each vehicle's
+ * `history` to an array and any un-dated part to its assumed-original fitment, and
+ * repoint `activeVehicleId` if it names a missing vehicle. Unknown or newer-than-current
+ * versions fall back to defaults (via a null return).
  */
 export function normalizeState(parsed: unknown): AppState | null {
-  if (!parsed || typeof parsed !== 'object') return null
-  const candidate = parsed as Partial<AppState>
-  if (candidate.version !== CURRENT_VERSION || !Array.isArray(candidate.vehicles)) {
-    return null
-  }
-  const vehicles = candidate.vehicles
-  let activeVehicleId = candidate.activeVehicleId ?? null
+  const migrated = migrate(parsed)
+  if (!migrated) return null
+  const vehicles: Vehicle[] = migrated.vehicles.map((v) => ({
+    ...v,
+    history: Array.isArray(v.history) ? v.history : [],
+    parts: Array.isArray(v.parts)
+      ? v.parts.map((p) =>
+          p.fitDate === null || p.fitMileage === null ? { ...p, ...originalFitment(v.year) } : p,
+        )
+      : [],
+  }))
+  let activeVehicleId = migrated.activeVehicleId
   if (activeVehicleId !== null && !vehicles.some((v) => v.id === activeVehicleId)) {
     activeVehicleId = vehicles[0]?.id ?? null
   }

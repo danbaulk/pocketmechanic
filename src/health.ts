@@ -14,6 +14,11 @@ export function daysBetween(from: Date, to: Date): number {
   return (to.getTime() - from.getTime()) / MS_PER_DAY
 }
 
+/** An un-dated part is assumed original: fitted from new (0 miles) at the car's year start. */
+export function originalFitment(year: number): { fitDate: string; fitMileage: number } {
+  return { fitDate: `${year}-01-01`, fitMileage: 0 }
+}
+
 /**
  * Estimate the vehicle's current odometer ("electricity-meter" model): the last
  * actual reading plus average annual mileage projected over the days since.
