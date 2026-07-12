@@ -1,15 +1,9 @@
-import { useState } from 'react'
-import type { Vehicle } from '../types.ts'
 import type { PartWithHealth } from '../health.ts'
-import { useGarage } from '../garageContext.ts'
 import { RAG_STYLES } from '../rag.ts'
 import { consumedPercent, dueText, formatCost } from '../format.ts'
-import { PartFitmentForm } from './PartFitmentForm.tsx'
 
-export function PartRow({ vehicle, item }: { vehicle: Vehicle; item: PartWithHealth }) {
-  const { dispatch } = useGarage()
-  const [editing, setEditing] = useState(false)
-  const { part, cat, health } = item
+export function PartRow({ item }: { item: PartWithHealth }) {
+  const { cat, health } = item
   const styles = RAG_STYLES[health.rag]
   const pct = consumedPercent(health)
 
@@ -31,23 +25,6 @@ export function PartRow({ vehicle, item }: { vehicle: Vehicle; item: PartWithHea
           </div>
         )}
       </div>
-      <div className="flex shrink-0 flex-col gap-1">
-        <button
-          type="button"
-          onClick={() => setEditing(true)}
-          className="rounded-md px-2 py-1 text-xs font-medium text-sky-600 hover:bg-sky-50"
-        >
-          {health.known ? 'Replaced' : 'Set fitted'}
-        </button>
-        <button
-          type="button"
-          onClick={() => dispatch({ type: 'removePart', vehicleId: vehicle.id, partId: part.id })}
-          className="rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-        >
-          Remove
-        </button>
-      </div>
-      {editing && <PartFitmentForm vehicle={vehicle} part={part} cat={cat} onClose={() => setEditing(false)} />}
     </li>
   )
 }

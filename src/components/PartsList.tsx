@@ -4,13 +4,11 @@ import type { PartZone } from '../data/partsCatalogue.ts'
 import { getPartsByZone, type ZoneGroup } from '../health.ts'
 import { RAG_STYLES } from '../rag.ts'
 import { PartRow } from './PartRow.tsx'
-import { AddPartForm } from './AddPartForm.tsx'
 
 /** A request to focus a zone's section. `n` changes on every tap so repeats re-trigger. */
 export type ZoneFocus = { zone: PartZone; n: number }
 
 export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFocus | null }) {
-  const [adding, setAdding] = useState(false)
   const zones = getPartsByZone(vehicle, new Date())
 
   const redCount = zones.reduce((n, z) => n + z.redCount, 0)
@@ -29,16 +27,7 @@ export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFo
 
   return (
     <section className="space-y-4">
-      <div className="flex items-center justify-between">
-        <h3 className="font-semibold text-slate-900">Parts by area</h3>
-        <button
-          type="button"
-          onClick={() => setAdding(true)}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-        >
-          + Add part
-        </button>
-      </div>
+      <h3 className="font-semibold text-slate-900">Parts by area</h3>
 
       {(redCount > 0 || amberCount > 0) && (
         <p className="text-sm text-slate-500">
@@ -56,26 +45,21 @@ export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFo
         zones.map((zone) => (
           <ZoneSection
             key={zone.zone}
-            vehicle={vehicle}
             zone={zone}
             highlighted={highlighted === zone.zone}
             innerRef={(el) => sections.current.set(zone.zone, el)}
           />
         ))
       )}
-
-      {adding && <AddPartForm vehicle={vehicle} onClose={() => setAdding(false)} />}
     </section>
   )
 }
 
 function ZoneSection({
-  vehicle,
   zone,
   highlighted,
   innerRef,
 }: {
-  vehicle: Vehicle
   zone: ZoneGroup
   highlighted: boolean
   innerRef: (el: HTMLDivElement | null) => void
@@ -95,7 +79,7 @@ function ZoneSection({
       </div>
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
         {zone.parts.map((item) => (
-          <PartRow key={item.part.id} vehicle={vehicle} item={item} />
+          <PartRow key={item.part.id} item={item} />
         ))}
       </ul>
     </div>
