@@ -1,5 +1,6 @@
-import type { FittedPart, RAG, Vehicle } from './types.ts'
+import type { FittedPart, HistoryEntry, RAG, Vehicle } from './types.ts'
 import { getCataloguePart, ZONE_ORDER, type CataloguePart, type PartZone } from './data/partsCatalogue.ts'
+import { latestByDate } from './history.ts'
 
 /**
  * Fraction-of-life at which a part turns amber (flat 10%-remaining for every part).
@@ -17,6 +18,28 @@ export function daysBetween(from: Date, to: Date): number {
 /** An un-dated part is assumed original: fitted from new (0 miles) at the car's year start. */
 export function originalFitment(year: number): { fitDate: string; fitMileage: number } {
   return { fitDate: `${year}-01-01`, fitMileage: 0 }
+}
+
+/**
+ * A part's effective wear-clock anchor, derived from history: the most recent job that
+ * replaced it (the shared `latestByDate` rule). Only entries carrying a mileage can re-anchor
+ * the clock. The part's own recorded fitment acts as a floor - it wins when it is newer than
+ * every such job, so back-filling old history can't age a part that was fitted more recently -
+ * and is the fallback when no job has replaced it.
+ */
+export function effectiveFitment(
+  part: FittedPart,
+  history: HistoryEntry[],
+): { fitDate: string | null; fitMileage: number | null } {
+  const own = { fitDate: part.fitDate, fitMileage: part.fitMileage }
+  const jobs = history.filter(
+    (h): h is HistoryEntry & { mileage: number } =>
+      h.mileage !== null && (h.partRefs?.some((r) => r.partId === part.id) ?? false),
+  )
+  const best = latestByDate(jobs, (h) => h.date)
+  if (best === null) return own
+  if (own.fitDate !== null && own.fitMileage !== null && own.fitDate > best.date) return own
+  return { fitDate: best.date, fitMileage: best.mileage }
 }
 
 /**
@@ -95,7 +118,10 @@ function allPartsWithHealth(vehicle: Vehicle, now: Date): PartWithHealth[] {
   for (const part of vehicle.parts) {
     const cat = getCataloguePart(part.catalogueId)
     if (!cat) continue // catalogueId no longer in the catalogue (e.g. removed part)
-    out.push({ part, cat, health: computePartHealth(part, cat, currentMileage, now) })
+    // Health runs against the part's effective fitment (latest replacement job), not its
+    // originally-recorded one - so editing/deleting a job re-derives its parts' health.
+    const eff = effectiveFitment(part, vehicle.history)
+    out.push({ part, cat, health: computePartHealth({ ...part, ...eff }, cat, currentMileage, now) })
   }
   return out
 }

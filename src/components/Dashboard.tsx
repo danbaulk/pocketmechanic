@@ -1,16 +1,25 @@
 import { useState } from 'react'
 import type { Vehicle } from '../types.ts'
 import type { PartZone } from '../data/partsCatalogue.ts'
+import type { PartWithHealth } from '../health.ts'
 import { useGarage } from '../garageContext.ts'
 import { CarAvatar } from './CarAvatar.tsx'
 import { PartsList, type ZoneFocus } from './PartsList.tsx'
-import { HistoryTimeline } from './HistoryTimeline.tsx'
+import { HistoryTimeline, type EntryFocus } from './HistoryTimeline.tsx'
+import { PartDetailModal } from './PartDetailModal.tsx'
 
 export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
   const { dispatch } = useGarage()
-  // The `n` counter re-triggers the scroll even when the same zone is tapped twice.
+  // The `n` counter re-triggers the scroll even when the same zone/entry is targeted twice.
   const [focus, setFocus] = useState<ZoneFocus | null>(null)
   const focusZone = (zone: PartZone) => setFocus((f) => ({ zone, n: (f?.n ?? 0) + 1 }))
+
+  const [selectedPart, setSelectedPart] = useState<PartWithHealth | null>(null)
+  const [entryFocus, setEntryFocus] = useState<EntryFocus | null>(null)
+  const jumpToEntry = (entryId: string) => {
+    setEntryFocus((f) => ({ entryId, n: (f?.n ?? 0) + 1 }))
+    setSelectedPart(null)
+  }
 
   function remove() {
     if (confirm(`Remove ${vehicle.make} ${vehicle.model} and its history?`)) {
@@ -39,8 +48,16 @@ export function Dashboard({ vehicle }: { vehicle: Vehicle }) {
         </button>
       </div>
       <CarAvatar vehicle={vehicle} onZoneClick={focusZone} />
-      <PartsList vehicle={vehicle} focus={focus} />
-      <HistoryTimeline vehicle={vehicle} />
+      <PartsList vehicle={vehicle} focus={focus} onSelectPart={setSelectedPart} />
+      <HistoryTimeline vehicle={vehicle} focus={entryFocus} />
+      {selectedPart && (
+        <PartDetailModal
+          item={selectedPart}
+          vehicle={vehicle}
+          onJumpToEntry={jumpToEntry}
+          onClose={() => setSelectedPart(null)}
+        />
+      )}
     </div>
   )
 }

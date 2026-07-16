@@ -1,6 +1,7 @@
-import type { AppState, FittedPart, HistoryEntry, Vehicle } from './types.ts'
+import type { AppState, FittedPart, HistoryEntry, PartRef, Vehicle } from './types.ts'
 import { PART_CATALOGUE } from './data/partsCatalogue.ts'
 import { originalFitment } from './health.ts'
+import { deriveAnchor } from './history.ts'
 
 export function uid(): string {
   return crypto.randomUUID()
@@ -23,9 +24,8 @@ export type Action =
   | { type: 'deleteVehicle'; id: string }
   | { type: 'setActiveVehicle'; id: string }
   | { type: 'recordReading'; vehicleId: string; miles: number; date: string }
-  | { type: 'setPartFitment'; vehicleId: string; partId: string; fitDate: string; fitMileage: number }
-  | { type: 'replacePart'; vehicleId: string; partId: string; fitDate: string; fitMileage: number; note?: string }
-  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail' }
+  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
+  | { type: 'updateHistoryEntry'; vehicleId: string; entryId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
   | { type: 'removeHistoryEntry'; vehicleId: string; entryId: string }
   | { type: 'addPart'; vehicleId: string; catalogueId: string; fitDate: string | null; fitMileage: number | null }
   | { type: 'removePart'; vehicleId: string; partId: string }
@@ -47,13 +47,60 @@ function updateVehicle(state: AppState, id: string, fn: (v: Vehicle) => Vehicle)
 }
 
 /**
- * Move the odometer anchor to a newly-logged reading, but only when it is at least as
- * recent as the current anchor — so back-dating an event never drags the estimate
- * backwards. ISO yyyy-mm-dd dates compare correctly as strings.
+ * Re-anchor the odometer to whatever history now implies (see `deriveAnchor`). Called after
+ * every history change, so editing or deleting an entry can never leave the estimate anchored
+ * to a reading that no longer exists - the same derive-from-history rule that governs part
+ * fitment. Back-dating still can't drag the anchor backwards, because a later entry keeps
+ * winning. The existing anchor stands when no entry carries a mileage at all.
  */
-function reAnchor(v: Vehicle, miles: number | null, date: string): Vehicle {
-  if (miles === null || date < v.lastReadingDate) return v
-  return { ...v, lastReadingMiles: miles, lastReadingDate: date }
+function recomputeAnchor(v: Vehicle): Vehicle {
+  const anchor = deriveAnchor(v.history)
+  if (anchor === null) return v
+  return { ...v, lastReadingMiles: anchor.miles, lastReadingDate: anchor.date }
+}
+
+/**
+ * Resolve the parts a job replaced into denormalised `PartRef`s. `prevRefs` (the entry's
+ * existing refs, when editing) backstops a part since removed from the car: without it, editing
+ * an entry would silently erase the record of what it replaced - the very thing denormalising
+ * `catalogueId` exists to protect.
+ */
+function partRefsFor(v: Vehicle, partIds: string[] | undefined, prevRefs: PartRef[] = []): PartRef[] {
+  if (!partIds?.length) return []
+  const refs: PartRef[] = []
+  for (const partId of partIds) {
+    const catalogueId =
+      v.parts.find((p) => p.id === partId)?.catalogueId ??
+      prevRefs.find((r) => r.partId === partId)?.catalogueId
+    if (catalogueId) refs.push({ partId, catalogueId })
+  }
+  return refs
+}
+
+/** Build a service/MOT/repair history entry from job fields, denormalising its replaced parts. */
+function buildJobEntry(
+  v: Vehicle,
+  id: string,
+  fields: {
+    kind: 'service' | 'mot' | 'repair'
+    date: string
+    mileage: number | null
+    note?: string
+    motResult?: 'pass' | 'fail'
+    partIds?: string[]
+  },
+  prevRefs?: PartRef[],
+): HistoryEntry {
+  const partRefs = partRefsFor(v, fields.partIds, prevRefs)
+  return {
+    id,
+    kind: fields.kind,
+    date: fields.date,
+    mileage: fields.mileage,
+    ...(fields.note?.trim() ? { note: fields.note.trim() } : {}),
+    ...(fields.motResult && fields.kind === 'mot' ? { motResult: fields.motResult } : {}),
+    ...(partRefs.length ? { partRefs } : {}),
+  }
 }
 
 export function garageReducer(state: AppState, action: Action): AppState {
@@ -92,55 +139,27 @@ export function garageReducer(state: AppState, action: Action): AppState {
     case 'recordReading':
       return updateVehicle(state, action.vehicleId, (v) => {
         const entry: HistoryEntry = { id: uid(), kind: 'reading', date: action.date, mileage: action.miles }
-        return reAnchor({ ...v, history: [...v.history, entry] }, action.miles, action.date)
-      })
-
-    case 'setPartFitment':
-      return updateVehicle(state, action.vehicleId, (v) => ({
-        ...v,
-        parts: v.parts.map((p) =>
-          p.id === action.partId
-            ? { ...p, fitDate: action.fitDate, fitMileage: action.fitMileage }
-            : p,
-        ),
-      }))
-
-    case 'replacePart':
-      return updateVehicle(state, action.vehicleId, (v) => {
-        const part = v.parts.find((p) => p.id === action.partId)
-        const entry: HistoryEntry = {
-          id: uid(),
-          kind: 'replacement',
-          date: action.fitDate,
-          mileage: action.fitMileage,
-          partId: action.partId,
-          ...(part ? { catalogueId: part.catalogueId } : {}),
-          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
-        }
-        const parts = v.parts.map((p) =>
-          p.id === action.partId ? { ...p, fitDate: action.fitDate, fitMileage: action.fitMileage } : p,
-        )
-        return reAnchor({ ...v, parts, history: [...v.history, entry] }, action.fitMileage, action.fitDate)
+        return recomputeAnchor({ ...v, history: [...v.history, entry] })
       })
 
     case 'addHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
-        const entry: HistoryEntry = {
-          id: uid(),
-          kind: action.kind,
-          date: action.date,
-          mileage: action.mileage,
-          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
-          ...(action.motResult ? { motResult: action.motResult } : {}),
-        }
-        return reAnchor({ ...v, history: [...v.history, entry] }, action.mileage, action.date)
+        const entry = buildJobEntry(v, uid(), action)
+        return recomputeAnchor({ ...v, history: [...v.history, entry] })
+      })
+
+    case 'updateHistoryEntry':
+      return updateVehicle(state, action.vehicleId, (v) => {
+        const prev = v.history.find((h) => h.id === action.entryId)
+        const entry = buildJobEntry(v, action.entryId, action, prev?.partRefs)
+        const history = v.history.map((h) => (h.id === action.entryId ? entry : h))
+        return recomputeAnchor({ ...v, history })
       })
 
     case 'removeHistoryEntry':
-      return updateVehicle(state, action.vehicleId, (v) => ({
-        ...v,
-        history: v.history.filter((h) => h.id !== action.entryId),
-      }))
+      return updateVehicle(state, action.vehicleId, (v) =>
+        recomputeAnchor({ ...v, history: v.history.filter((h) => h.id !== action.entryId) }),
+      )
 
     case 'addPart':
       return updateVehicle(state, action.vehicleId, (v) => {

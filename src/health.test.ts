@@ -1,12 +1,13 @@
 import { describe, it, expect } from 'vitest'
 import {
   computePartHealth,
+  effectiveFitment,
   estimateCurrentMileage,
   getPartsByZone,
   getPartsWithHealth,
   vehicleWorstRag,
 } from './health.ts'
-import type { FittedPart, Vehicle } from './types.ts'
+import type { FittedPart, HistoryEntry, Vehicle } from './types.ts'
 import type { CataloguePart } from './data/partsCatalogue.ts'
 
 const pads: CataloguePart = {
@@ -123,6 +124,65 @@ describe('computePartHealth — unknown fitment', () => {
   it('returns known:false when the fit date or mileage is missing', () => {
     expect(computePartHealth(part({ fitDate: null }), pads, 60_000, NOW).known).toBe(false)
     expect(computePartHealth(part({ fitMileage: null }), pads, 60_000, NOW).known).toBe(false)
+  })
+})
+
+describe('effectiveFitment', () => {
+  const p = part({ id: 'p1', fitDate: '2020-01-01', fitMileage: 40_000 })
+  const ref = [{ partId: 'p1', catalogueId: 'brake-pads-front' }]
+
+  it('uses the most recent job that replaced the part', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'service', date: '2023-01-01', mileage: 60_000, partRefs: ref },
+      { id: 'h2', kind: 'repair', date: '2025-01-01', mileage: 90_000, partRefs: ref },
+    ]
+    expect(effectiveFitment(p, history)).toEqual({ fitDate: '2025-01-01', fitMileage: 90_000 })
+  })
+
+  it('breaks same-date ties in favour of the later-added entry', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'service', date: '2025-01-01', mileage: 90_000, partRefs: ref },
+      { id: 'h2', kind: 'repair', date: '2025-01-01', mileage: 95_000, partRefs: ref },
+    ]
+    expect(effectiveFitment(p, history).fitMileage).toBe(95_000)
+  })
+
+  it('falls back to the part\'s own fitment when no job replaced it', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'service', date: '2025-01-01', mileage: 90_000, partRefs: [{ partId: 'other', catalogueId: 'x' }] },
+    ]
+    expect(effectiveFitment(p, history)).toEqual({ fitDate: '2020-01-01', fitMileage: 40_000 })
+  })
+
+  it("keeps the part's own fitment when it is newer than every job", () => {
+    // Part fitted 2026; history back-filled with an older job that also replaced it.
+    const fresh = part({ id: 'p1', fitDate: '2026-01-01', fitMileage: 78_000 })
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'repair', date: '2020-01-01', mileage: 30_000, partRefs: ref },
+    ]
+    expect(effectiveFitment(fresh, history)).toEqual({ fitDate: '2026-01-01', fitMileage: 78_000 })
+  })
+
+  it('ignores replacement entries that carry no mileage', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'mot', date: '2025-01-01', mileage: null, partRefs: ref },
+    ]
+    expect(effectiveFitment(p, history)).toEqual({ fitDate: '2020-01-01', fitMileage: 40_000 })
+  })
+})
+
+describe('getPartsByZone - derives health from replacement history', () => {
+  it('a job that replaces a worn part flips it to green', () => {
+    const v: Vehicle = {
+      id: 'v', make: 'A', model: 'B', year: 2018,
+      lastReadingMiles: 80_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 0,
+      parts: [{ id: 'pads', catalogueId: 'brake-pads-front', fitDate: '2018-01-01', fitMileage: 0 }],
+      history: [
+        { id: 'h1', kind: 'service', date: '2026-07-04', mileage: 80_000, partRefs: [{ partId: 'pads', catalogueId: 'brake-pads-front' }] },
+      ],
+    }
+    const front = getPartsByZone(v, NOW).find((z) => z.zone === 'Front wheels')!
+    expect(front.parts[0].health.rag).toBe('green')
   })
 })
 

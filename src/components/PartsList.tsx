@@ -1,14 +1,22 @@
 import { useEffect, useRef, useState } from 'react'
 import type { Vehicle } from '../types.ts'
 import type { PartZone } from '../data/partsCatalogue.ts'
-import { getPartsByZone, type ZoneGroup } from '../health.ts'
+import { getPartsByZone, type PartWithHealth, type ZoneGroup } from '../health.ts'
 import { RAG_STYLES } from '../rag.ts'
 import { PartRow } from './PartRow.tsx'
 
 /** A request to focus a zone's section. `n` changes on every tap so repeats re-trigger. */
 export type ZoneFocus = { zone: PartZone; n: number }
 
-export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFocus | null }) {
+export function PartsList({
+  vehicle,
+  focus,
+  onSelectPart,
+}: {
+  vehicle: Vehicle
+  focus?: ZoneFocus | null
+  onSelectPart: (item: PartWithHealth) => void
+}) {
   const zones = getPartsByZone(vehicle, new Date())
 
   const redCount = zones.reduce((n, z) => n + z.redCount, 0)
@@ -48,6 +56,7 @@ export function PartsList({ vehicle, focus }: { vehicle: Vehicle; focus?: ZoneFo
             zone={zone}
             highlighted={highlighted === zone.zone}
             innerRef={(el) => sections.current.set(zone.zone, el)}
+            onSelectPart={onSelectPart}
           />
         ))
       )}
@@ -59,10 +68,12 @@ function ZoneSection({
   zone,
   highlighted,
   innerRef,
+  onSelectPart,
 }: {
   zone: ZoneGroup
   highlighted: boolean
   innerRef: (el: HTMLDivElement | null) => void
+  onSelectPart: (item: PartWithHealth) => void
 }) {
   const dot = zone.worstRag ? RAG_STYLES[zone.worstRag].dot : 'bg-slate-300'
   return (
@@ -79,7 +90,7 @@ function ZoneSection({
       </div>
       <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
         {zone.parts.map((item) => (
-          <PartRow key={item.part.id} item={item} />
+          <PartRow key={item.part.id} item={item} onSelect={onSelectPart} />
         ))}
       </ul>
     </div>
