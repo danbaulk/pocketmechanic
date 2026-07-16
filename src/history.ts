@@ -1,4 +1,4 @@
-import type { HistoryEntry, HistoryKind, Vehicle } from './types.ts'
+import type { HistoryEntry, HistoryKind, PartRef, Vehicle } from './types.ts'
 import { getCataloguePart } from './data/partsCatalogue.ts'
 
 /**
@@ -65,19 +65,28 @@ export const HISTORY_KIND_META: Record<HistoryKind, { label: string; description
   service: { label: 'Service', description: 'Routine service or maintenance' },
   mot: { label: 'MOT', description: 'Annual MOT test' },
   repair: { label: 'Repair', description: 'A fault fixed or work carried out' },
+  inspection: { label: 'Inspection', description: 'Parts checked and found not to need replacing' },
   replacement: { label: 'Part replaced', description: 'A tracked part was replaced' },
   reading: { label: 'Odometer reading', description: 'A recorded mileage reading' },
 }
 
+/** Catalogue names for a set of part refs, falling back to a bare "part" for a stale slug. */
+function refNames(refs: PartRef[]): string {
+  return refs.map((r) => getCataloguePart(r.catalogueId)?.name ?? 'part').join(', ')
+}
+
 /**
- * Human detail line for an entry, beyond its kind badge, date and mileage: the replaced
- * part's name, an MOT result, and/or the free-text note. Null when there's nothing to add.
+ * Human detail line for an entry, beyond its kind badge, date and mileage: the parts it
+ * replaced and/or checked, an MOT result, and/or the free-text note. Null when there's
+ * nothing to add.
  */
 export function entryDetail(entry: HistoryEntry): string | null {
   const parts: string[] = []
   if (entry.partRefs?.length) {
-    const names = entry.partRefs.map((r) => getCataloguePart(r.catalogueId)?.name ?? 'part')
-    parts.push(`Replaced: ${names.join(', ')}`)
+    parts.push(`Replaced: ${refNames(entry.partRefs)}`)
+  }
+  if (entry.checkedRefs?.length) {
+    parts.push(`Checked: ${refNames(entry.checkedRefs)}`)
   }
   if (entry.kind === 'mot' && entry.motResult) {
     parts.push(entry.motResult === 'pass' ? 'Passed' : 'Failed')

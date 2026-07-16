@@ -1,4 +1,4 @@
-import type { PartHealth } from './health.ts'
+import type { Clock, PartHealth } from './health.ts'
 
 export function formatMiles(n: number): string {
   return `${Math.round(n).toLocaleString('en-GB')} mi`
@@ -29,21 +29,42 @@ function formatDuration(days: number): string {
   return `${Math.max(0, Math.round(days))} days`
 }
 
-/** Human "due" text from the driving clock, e.g. "due in 2,400 mi" or "overdue by 3 months". */
+/** What's left on a clock, from whichever of mileage/age drives it. Null if neither is tracked. */
+function remainingText(clock: Clock): { text: string; overdue: boolean } | null {
+  if (clock.driver === 'mileage' && clock.milesRemaining !== undefined) {
+    const r = clock.milesRemaining
+    return { text: formatMiles(Math.abs(r)), overdue: r < 0 }
+  }
+  if (clock.driver === 'age' && clock.daysRemaining !== undefined) {
+    const d = clock.daysRemaining
+    return { text: formatDuration(Math.abs(d)), overdue: d < 0 }
+  }
+  return null
+}
+
+/**
+ * Human "due" text from the part's active clock, e.g. "due in 2,400 mi" or "overdue by 3
+ * months". A passed inspection is why a part still has life left, so it gets named while that
+ * life lasts. Once the part is overdue even on its extended clock the check vouches for
+ * nothing, and the plain wording stands.
+ */
 export function dueText(health: PartHealth): string {
   if (!health.known) return 'Fitment not recorded'
 
-  if (health.driver === 'mileage' && health.milesRemaining !== undefined) {
-    const r = health.milesRemaining
-    return r >= 0 ? `due in ${formatMiles(r)}` : `overdue by ${formatMiles(-r)}`
-  }
-  if (health.driver === 'age' && health.daysRemaining !== undefined) {
-    const d = health.daysRemaining
-    return d >= 0 ? `due in ${formatDuration(d)}` : `overdue by ${formatDuration(-d)}`
-  }
-  return health.fraction >= 1 ? 'due now' : 'healthy'
+  const clock = health.inspected ? health.inspected.extended : health.wear
+  const left = remainingText(clock)
+  if (!left) return clock.fraction >= 1 ? 'due now' : 'healthy'
+  if (left.overdue) return `overdue by ${left.text}`
+  return health.inspected ? `checked OK - due in ${left.text}` : `due in ${left.text}`
 }
 
+/** How far through the part's active clock, as a percentage - what the progress bar fills to. */
 export function consumedPercent(health: PartHealth): number {
-  return Math.max(0, Math.round(health.fraction * 100))
+  const clock = health.inspected ? health.inspected.extended : health.wear
+  return Math.max(0, Math.round(clock.fraction * 100))
+}
+
+/** How much of the part's nominal life it has genuinely used, ignoring any inspection. */
+export function wearPercent(health: PartHealth): number {
+  return Math.max(0, Math.round(health.wear.fraction * 100))
 }

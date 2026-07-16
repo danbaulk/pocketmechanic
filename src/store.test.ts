@@ -132,6 +132,132 @@ describe('replacing parts as part of a job', () => {
   })
 })
 
+describe('inspecting parts as part of a job', () => {
+  /** A red 2018-seeded part, plus its id, on a car at 54,200 miles. */
+  function carWithRedPads() {
+    const s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
+    expect(ragOf(v, 'brake-pads-front')).toBe('red')
+    return { s, v, padsId: pads.id }
+  }
+
+  it('an inspection denormalises checkedRefs and clears the warning', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    const s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, note: 'garage says plenty left', checkedPartIds: [padsId],
+    })
+
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('green')
+    expect(s.vehicles[0].history.at(-1)).toMatchObject({
+      kind: 'inspection',
+      note: 'garage says plenty left',
+      checkedRefs: [{ partId: padsId, catalogueId: 'brake-pads-front' }],
+    })
+    // Extended, not replaced: the part's wear clock is untouched and still reads overdue.
+    expect(s.vehicles[0].history.at(-1)!.partRefs).toBeUndefined()
+  })
+
+  it('a service can replace one part and check another in the same visit', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    const oil = v.parts.find((p) => p.catalogueId === 'engine-oil')!
+    const s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-07-04', mileage: 54_200,
+      partIds: [oil.id], checkedPartIds: [padsId],
+    })
+
+    expect(s.vehicles[0].history.at(-1)).toMatchObject({
+      partRefs: [{ partId: oil.id, catalogueId: 'engine-oil' }],
+      checkedRefs: [{ partId: padsId, catalogueId: 'brake-pads-front' }],
+    })
+    expect(ragOf(s.vehicles[0], 'engine-oil')).toBe('green')
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('green')
+  })
+
+  it('a part claimed as both replaced and checked is only replaced', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    const s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-07-04', mileage: 54_200,
+      partIds: [padsId], checkedPartIds: [padsId],
+    })
+
+    const entry = s.vehicles[0].history.at(-1)!
+    expect(entry.partRefs).toEqual([{ partId: padsId, catalogueId: 'brake-pads-front' }])
+    expect(entry.checkedRefs).toBeUndefined()
+  })
+
+  it('editing an entry for an unrelated reason keeps the part extended', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    let s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, checkedPartIds: [padsId],
+    })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+
+    // The part leaves the car, then the entry's note is fixed.
+    s = run(s, { type: 'removePart', vehicleId: v.id, partId: padsId })
+    s = run(s, {
+      type: 'updateHistoryEntry', vehicleId: v.id, entryId, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, note: 'typo fixed', checkedPartIds: [padsId],
+    })
+
+    // The denormalised ref survives, so the timeline still shows what was checked.
+    const edited = s.vehicles[0].history.find((h) => h.id === entryId)!
+    expect(edited.kind).toBe('inspection')
+    expect(edited.checkedRefs).toEqual([{ partId: padsId, catalogueId: 'brake-pads-front' }])
+    expect(edited.note).toBe('typo fixed')
+  })
+
+  it('deleting the inspection puts the warning straight back', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    let s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, checkedPartIds: [padsId],
+    })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('green')
+
+    s = run(s, { type: 'removeHistoryEntry', vehicleId: v.id, entryId })
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('red')
+  })
+
+  it('unticking the part on an edit puts the warning back', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    let s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, checkedPartIds: [padsId],
+    })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+
+    s = run(s, {
+      type: 'updateHistoryEntry', vehicleId: v.id, entryId, kind: 'inspection',
+      date: '2026-07-04', mileage: 54_200, checkedPartIds: [],
+    })
+    expect(s.vehicles[0].history.find((h) => h.id === entryId)!.checkedRefs).toBeUndefined()
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('red')
+  })
+
+  it('a later replacement makes an earlier inspection irrelevant', () => {
+    const { s: s0, v, padsId } = carWithRedPads()
+    let s = run(s0, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'inspection', date: '2026-07-04',
+      mileage: 54_200, checkedPartIds: [padsId],
+    })
+    // Replaced a month later: the new part is green on its own merits, not the old check's.
+    s = run(s, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'repair', date: '2026-08-04',
+      mileage: 54_800, partIds: [padsId],
+    })
+
+    const zones = getPartsByZone(s.vehicles[0], new Date('2026-08-04T12:00:00Z'))
+    const pads = zones.flatMap((z) => z.parts).find((p) => p.cat.id === 'brake-pads-front')!
+    expect(pads.health.rag).toBe('green')
+    expect(pads.health.inspected).toBeUndefined()
+    expect(pads.health.wear.fraction).toBeCloseTo(0)
+  })
+})
+
 describe('addHistoryEntry', () => {
   it('appends the entry and re-anchors when the mileage is the newest', () => {
     let s = run(defaultState(), NEW_CAR)
@@ -291,7 +417,7 @@ describe('storage normalizeState', () => {
       ],
     }
     const migrated = normalizeState(v1)!
-    expect(migrated.version).toBe(3)
+    expect(migrated.version).toBe(4)
     const v = migrated.vehicles[0]
     expect(v).toMatchObject({ make: 'VW', model: 'Golf', avgAnnualMiles: 8000 })
     expect(v.history).toEqual([
@@ -318,12 +444,32 @@ describe('storage normalizeState', () => {
       ],
     }
     const migrated = normalizeState(v2)!
-    expect(migrated.version).toBe(3)
+    expect(migrated.version).toBe(4)
     const entry = migrated.vehicles[0].history.find((h) => h.id === 'h2')!
     expect(entry.partRefs).toEqual([{ partId: 'p1', catalogueId: 'brake-pads-front' }])
     expect('partId' in entry).toBe(false)
     // Untouched entries pass through.
     expect(migrated.vehicles[0].history.find((h) => h.id === 'h1')).toMatchObject({ kind: 'reading' })
+  })
+
+  it('migrates a v3 blob: inspections are additive, so entries pass through untouched', () => {
+    const v3 = {
+      version: 3,
+      activeVehicleId: 'car-1',
+      vehicles: [
+        {
+          id: 'car-1', make: 'VW', model: 'Golf', year: 2015,
+          lastReadingMiles: 80_000, lastReadingDate: '2025-01-01', avgAnnualMiles: 8000,
+          parts: [{ id: 'p1', catalogueId: 'brake-pads-front', fitDate: '2020-01-01', fitMileage: 40_000 }],
+          history: [
+            { id: 'h1', kind: 'service', date: '2024-06-01', mileage: 70_000, partRefs: [{ partId: 'p1', catalogueId: 'brake-pads-front' }] },
+          ],
+        },
+      ],
+    }
+    const migrated = normalizeState(v3)!
+    expect(migrated.version).toBe(4)
+    expect(migrated.vehicles[0].history[0]).toEqual(v3.vehicles[0].history[0])
   })
 
   it('heals a v2 vehicle missing its history array', () => {

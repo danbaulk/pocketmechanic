@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   computePartHealth,
   effectiveFitment,
+  effectiveInspection,
   estimateCurrentMileage,
   getPartsByZone,
   getPartsWithHealth,
@@ -72,8 +73,8 @@ describe('computePartHealth — mileage clock', () => {
     // 10k of 30k used = 33%.
     const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 60_000, NOW)
     expect(h.rag).toBe('green')
-    expect(h.driver).toBe('mileage')
-    expect(h.milesRemaining).toBe(20_000)
+    expect(h.wear.driver).toBe('mileage')
+    expect(h.wear.milesRemaining).toBe(20_000)
   })
 
   it('turns amber at 90% consumed', () => {
@@ -86,7 +87,7 @@ describe('computePartHealth — mileage clock', () => {
     // 30k of 30k used = 100%.
     const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 80_000, NOW)
     expect(h.rag).toBe('red')
-    expect(h.milesRemaining).toBe(0)
+    expect(h.wear.milesRemaining).toBe(0)
   })
 })
 
@@ -94,7 +95,7 @@ describe('computePartHealth — age clock', () => {
   it('classifies by years since fitting', () => {
     // Fitted 5+ years ago on a 5-year part → red.
     const h = computePartHealth(part({ fitDate: '2021-01-01', fitMileage: 0 }), battery, 0, NOW)
-    expect(h.driver).toBe('age')
+    expect(h.wear.driver).toBe('age')
     expect(h.rag).toBe('red')
   })
 
@@ -108,14 +109,14 @@ describe('computePartHealth — soonest wins when both clocks apply', () => {
   it('picks the age clock when it is further along than mileage', () => {
     // Belt: barely any miles used, but fitted 7+ years ago → age drives, red.
     const h = computePartHealth(part({ fitDate: '2018-01-01', fitMileage: 100_000 }), belt, 110_000, NOW)
-    expect(h.driver).toBe('age')
+    expect(h.wear.driver).toBe('age')
     expect(h.rag).toBe('red')
   })
 
   it('picks the mileage clock when it is further along than age', () => {
     // Belt: fitted recently by date, but 70k+ miles clocked up → mileage drives, red.
     const h = computePartHealth(part({ fitDate: '2025-01-01', fitMileage: 40_000 }), belt, 111_000, NOW)
-    expect(h.driver).toBe('mileage')
+    expect(h.wear.driver).toBe('mileage')
     expect(h.rag).toBe('red')
   })
 })
@@ -168,6 +169,146 @@ describe('effectiveFitment', () => {
       { id: 'h1', kind: 'mot', date: '2025-01-01', mileage: null, partRefs: ref },
     ]
     expect(effectiveFitment(p, history)).toEqual({ fitDate: '2020-01-01', fitMileage: 40_000 })
+  })
+})
+
+describe('effectiveInspection', () => {
+  const ref = [{ partId: 'p1', catalogueId: 'brake-pads-front' }]
+  const p = part({ id: 'p1' })
+
+  it('uses the most recent entry that checked the part', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'inspection', date: '2025-01-01', mileage: 90_000, checkedRefs: ref },
+      { id: 'h2', kind: 'service', date: '2026-01-01', mileage: 95_000, checkedRefs: ref },
+    ]
+    expect(effectiveInspection(p, history, '2020-01-01')).toEqual({ date: '2026-01-01', mileage: 95_000 })
+  })
+
+  it('is null when nothing has checked the part', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'inspection', date: '2025-01-01', mileage: 90_000, checkedRefs: [{ partId: 'other', catalogueId: 'x' }] },
+      // A job that *replaced* p1 is not a check.
+      { id: 'h2', kind: 'service', date: '2025-06-01', mileage: 92_000, partRefs: ref },
+    ]
+    expect(effectiveInspection(p, history, '2020-01-01')).toBeNull()
+  })
+
+  it('ignores a check that carries no mileage (nothing to measure the extension from)', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'mot', date: '2025-01-01', mileage: null, checkedRefs: ref },
+    ]
+    expect(effectiveInspection(p, history, '2020-01-01')).toBeNull()
+  })
+
+  it('ignores a check that predates the fitment - it inspected the part fitted before this one', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'inspection', date: '2019-01-01', mileage: 30_000, checkedRefs: ref },
+    ]
+    expect(effectiveInspection(p, history, '2020-01-01')).toBeNull()
+  })
+
+  it('ignores a check dated the same day the part was replaced', () => {
+    // They looked at it and then replaced it anyway: the check is moot.
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'service', date: '2020-01-01', mileage: 40_000, checkedRefs: ref },
+    ]
+    expect(effectiveInspection(p, history, '2020-01-01')).toBeNull()
+  })
+
+  it('does not let a check through on an un-dated fitment', () => {
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'inspection', date: '2025-01-01', mileage: 90_000, checkedRefs: ref },
+    ]
+    // A null fitDate can't be compared, so the check stands - but the part is known:false
+    // anyway, so computePartHealth never consults it.
+    expect(effectiveInspection(p, history, null)).toEqual({ date: '2025-01-01', mileage: 90_000 })
+    expect(computePartHealth(part({ fitDate: null }), pads, 90_000, NOW, { date: '2025-01-01', mileage: 90_000 }).known).toBe(false)
+  })
+})
+
+describe('computePartHealth - a passed inspection extends the part\'s life', () => {
+  it('extends from where the part stood at the check, not from its interval', () => {
+    // Pads: 41k of 30k used = 137% → red. Checked at 90k (40k used), buying 7.5k (25% of 30k)
+    // more: an extended life of 47.5k, of which 41k is used = 86% → green.
+    const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 91_000, NOW, { date: '2026-06-04', mileage: 90_000 })
+    expect(h.rag).toBe('green')
+    expect(h.inspected?.extended.fraction).toBeCloseTo(41_000 / 47_500)
+    expect(h.inspected?.extended.milesRemaining).toBe(6500)
+    // The part is still 137% through its usual interval and says so.
+    expect(h.wear.fraction).toBeCloseTo(41 / 30)
+  })
+
+  it('leaves a part that is not flagged yet completely alone', () => {
+    // 10k of 30k used = 33%: nothing to rescue, so the check is just a timeline record.
+    // Extending here would redraw the part as fresher than it is.
+    const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 60_000, NOW, { date: '2026-06-04', mileage: 59_000 })
+    expect(h.inspected).toBeUndefined()
+    expect(h.rag).toBe('green')
+    expect(h.wear.fraction).toBeCloseTo(1 / 3)
+  })
+
+  it('goes amber in the last 10% of the extended life', () => {
+    // Checked at 90k (40k used) → extended life 47.5k. 43k used = 90.5% of it.
+    const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 93_000, NOW, { date: '2026-06-04', mileage: 90_000 })
+    expect(h.rag).toBe('amber')
+    expect(h.inspected).toBeDefined()
+  })
+
+  it('reds once the extension is used up, keeping the record of the check', () => {
+    // 47.5k used of the 47.5k extended life: the extension is spent. Unlike a temporary hold,
+    // the extension stays on the record - the part is simply past even its extended life.
+    const h = computePartHealth(part({ fitMileage: 50_000 }), pads, 97_500, NOW, { date: '2026-06-04', mileage: 90_000 })
+    expect(h.rag).toBe('red')
+    expect(h.inspected).toBeDefined()
+    expect(h.inspected?.extended.milesRemaining).toBe(0)
+  })
+
+  it('extends an age-only part on its age clock alone', () => {
+    // Battery: 5-year part fitted 2021, now 5.5 years old → red. Checked at 5.0 years,
+    // buying 1.25 more (25% of 5) → an extended life of 6.25 years, 5.5 of it used = 88%.
+    const h = computePartHealth(part({ fitDate: '2021-01-01', fitMileage: 0 }), battery, 0, NOW, { date: '2026-01-01', mileage: 0 })
+    expect(h.rag).toBe('green')
+    expect(h.inspected?.extended.driver).toBe('age')
+    expect(h.inspected?.extended.milesRemaining).toBeUndefined() // no mileage interval to report
+    expect(h.inspected?.extended.fraction).toBeCloseTo(5.5 / 6.25, 2)
+  })
+
+  it('takes the soonest of the extended clocks, like the wear clock does', () => {
+    // Belt (70k/7yr): fitted 2018 and checked in 2022 at 4.5 years, buying 1.75 more (25% of 7)
+    // → an extended age life of 6.25 years, but the part is now 8.5 → red on age, despite the
+    // mileage clock having plenty left.
+    const h = computePartHealth(part({ fitDate: '2018-01-01', fitMileage: 100_000 }), belt, 111_000, NOW, { date: '2022-07-04', mileage: 110_000 })
+    expect(h.rag).toBe('red')
+    expect(h.inspected?.extended.driver).toBe('age')
+  })
+
+  it('lets a later re-check buy another extension', () => {
+    // Checked at 90k → extended to 47.5k, which 47k of use has nearly spent (amber). A fresh
+    // check at 97k (47k used) extends again to 54.5k → 86% → green.
+    const p = part({ fitMileage: 50_000 })
+    expect(computePartHealth(p, pads, 97_000, NOW, { date: '2026-06-04', mileage: 90_000 }).rag).toBe('amber')
+    expect(computePartHealth(p, pads, 97_000, NOW, { date: '2026-07-04', mileage: 97_000 }).rag).toBe('green')
+  })
+})
+
+describe('getPartsByZone - an inspected part sorts on its extended life', () => {
+  it('drops an inspected part below a genuinely due one, and de-reds its zone', () => {
+    const v: Vehicle = {
+      id: 'v', make: 'A', model: 'B', year: 2018,
+      lastReadingMiles: 92_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 0,
+      parts: [
+        // Both are way past their interval; only 'checked' has been inspected.
+        { id: 'checked', catalogueId: 'brake-pads-front', fitDate: '2018-01-01', fitMileage: 50_000 },
+        { id: 'discs', catalogueId: 'brake-discs-front', fitDate: '2018-01-01', fitMileage: 0 },
+      ],
+      history: [
+        { id: 'h1', kind: 'inspection', date: '2026-07-01', mileage: 91_000, checkedRefs: [{ partId: 'checked', catalogueId: 'brake-pads-front' }] },
+      ],
+    }
+    const front = getPartsByZone(v, NOW).find((z) => z.zone === 'Front wheels')!
+    // The un-inspected part is the one that still needs attention, so it leads.
+    expect(front.parts.map((p) => p.part.id)).toEqual(['discs', 'checked'])
+    expect(front.redCount).toBe(1)
   })
 })
 
