@@ -99,6 +99,26 @@ describe('replacing parts as part of a job', () => {
     expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('red')
   })
 
+  it('editing an entry keeps the record of a part since removed from the car', () => {
+    let s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
+    s = run(s, { type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-07-04', mileage: 54_200, partIds: [pads.id] })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+
+    // The part leaves the car, then the entry is edited for an unrelated reason.
+    s = run(s, { type: 'removePart', vehicleId: v.id, partId: pads.id })
+    s = run(s, {
+      type: 'updateHistoryEntry', vehicleId: v.id, entryId, kind: 'service', date: '2026-07-04',
+      mileage: 54_200, note: 'typo fixed', partIds: [pads.id],
+    })
+
+    // The denormalised ref survives, so the timeline still shows what was replaced.
+    const edited = s.vehicles[0].history.find((h) => h.id === entryId)!
+    expect(edited.partRefs).toEqual([{ partId: pads.id, catalogueId: 'brake-pads-front' }])
+    expect(edited.note).toBe('typo fixed')
+  })
+
   it('removeHistoryEntry reverts a part that job had replaced', () => {
     let s = run(defaultState(), NEW_CAR)
     const v = s.vehicles[0]

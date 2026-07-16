@@ -64,13 +64,20 @@ function recomputeAnchor(v: Vehicle): Vehicle {
   return { ...v, lastReadingMiles: best.miles, lastReadingDate: best.date }
 }
 
-/** Resolve the parts a job replaced into denormalised `PartRef`s (unknown ids are dropped). */
-function partRefsFor(v: Vehicle, partIds: string[] | undefined): PartRef[] {
+/**
+ * Resolve the parts a job replaced into denormalised `PartRef`s. `prevRefs` (the entry's
+ * existing refs, when editing) backstops a part since removed from the car: without it, editing
+ * an entry would silently erase the record of what it replaced - the very thing denormalising
+ * `catalogueId` exists to protect.
+ */
+function partRefsFor(v: Vehicle, partIds: string[] | undefined, prevRefs: PartRef[] = []): PartRef[] {
   if (!partIds?.length) return []
   const refs: PartRef[] = []
   for (const partId of partIds) {
-    const part = v.parts.find((p) => p.id === partId)
-    if (part) refs.push({ partId, catalogueId: part.catalogueId })
+    const catalogueId =
+      v.parts.find((p) => p.id === partId)?.catalogueId ??
+      prevRefs.find((r) => r.partId === partId)?.catalogueId
+    if (catalogueId) refs.push({ partId, catalogueId })
   }
   return refs
 }
@@ -87,8 +94,9 @@ function buildJobEntry(
     motResult?: 'pass' | 'fail'
     partIds?: string[]
   },
+  prevRefs?: PartRef[],
 ): HistoryEntry {
-  const partRefs = partRefsFor(v, fields.partIds)
+  const partRefs = partRefsFor(v, fields.partIds, prevRefs)
   return {
     id,
     kind: fields.kind,
@@ -147,7 +155,8 @@ export function garageReducer(state: AppState, action: Action): AppState {
 
     case 'updateHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
-        const entry = buildJobEntry(v, action.entryId, action)
+        const prev = v.history.find((h) => h.id === action.entryId)
+        const entry = buildJobEntry(v, action.entryId, action, prev?.partRefs)
         const history = v.history.map((h) => (h.id === action.entryId ? entry : h))
         return recomputeAnchor({ ...v, history })
       })
