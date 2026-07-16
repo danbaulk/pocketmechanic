@@ -3,22 +3,20 @@ import type { Vehicle } from '../types.ts'
 import { HISTORY_KIND_META } from '../history.ts'
 import { Modal } from './Modal.tsx'
 import { ReadingForm } from './ReadingForm.tsx'
-import { ReplacePartForm } from './ReplacePartForm.tsx'
-import { AddHistoryEntryForm, type EntryKind } from './AddHistoryEntryForm.tsx'
+import { HistoryEntryForm, type EntryKind } from './HistoryEntryForm.tsx'
 
-type Mode = null | 'menu' | 'reading' | 'replacement' | EntryKind
+type Mode = null | 'menu' | 'reading' | EntryKind
 
 const CHOICES: { mode: Exclude<Mode, null | 'menu'>; label: string; hint: string }[] = [
   { mode: 'reading', label: 'Update mileage', hint: 'Record an actual odometer reading' },
   { mode: 'service', label: 'Log service', hint: HISTORY_KIND_META.service.description },
   { mode: 'mot', label: 'Log MOT', hint: HISTORY_KIND_META.mot.description },
   { mode: 'repair', label: 'Log repair', hint: HISTORY_KIND_META.repair.description },
-  { mode: 'replacement', label: 'Replace a part', hint: "Log a replacement and reset that part's wear clock" },
 ]
 
 /**
  * The single "+ Log" entry point on the diagram card. Opens a chooser sheet, then the
- * relevant form: an odometer reading (`ReadingForm`) or a history entry (`AddHistoryEntryForm`).
+ * relevant form: an odometer reading (`ReadingForm`) or a history entry (`HistoryEntryForm`).
  */
 export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
   const [mode, setMode] = useState<Mode>(null)
@@ -53,9 +51,8 @@ export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
       )}
 
       {mode === 'reading' && <ReadingForm vehicle={vehicle} onClose={close} />}
-      {mode === 'replacement' && <ReplacePartForm vehicle={vehicle} onClose={close} />}
       {(mode === 'service' || mode === 'mot' || mode === 'repair') && (
-        <AddHistoryEntryForm vehicle={vehicle} initialKind={mode} onClose={close} />
+        <HistoryEntryForm vehicle={vehicle} initialKind={mode} onClose={close} />
       )}
     </>
   )

@@ -2,16 +2,19 @@ import type { AppState, HistoryEntry, Vehicle } from './types.ts'
 import { originalFitment } from './health.ts'
 
 const STORAGE_KEY = 'pocketmechanic:state'
-const CURRENT_VERSION = 2 as const
+const CURRENT_VERSION = 3 as const
 
 export function defaultState(): AppState {
   return { version: CURRENT_VERSION, vehicles: [], activeVehicleId: null }
 }
 
+/** A history entry mid-migration: may still carry the pre-v3 single-part `partId`/`catalogueId`. */
+type LegacyHistoryEntry = HistoryEntry & { partId?: string; catalogueId?: string }
+
 /** A loosely-typed stored blob mid-migration (older vehicles may predate `history`). */
 type StoredBlob = {
   version: number
-  vehicles: (Omit<Vehicle, 'history'> & { history?: HistoryEntry[] })[]
+  vehicles: (Omit<Vehicle, 'history'> & { history?: LegacyHistoryEntry[] })[]
   activeVehicleId: string | null
 }
 
@@ -30,6 +33,22 @@ const MIGRATIONS: Record<number, (blob: StoredBlob) => StoredBlob> = {
       history: [
         { id: crypto.randomUUID(), kind: 'reading', date: v.lastReadingDate, mileage: v.lastReadingMiles },
       ],
+    })),
+  }),
+  // v2 → v3: replacements moved from a single `partId`/`catalogueId` to a `partRefs` array (so
+  // service/MOT/repair jobs can each carry the parts they replaced). Rewrite legacy entries.
+  2: (blob) => ({
+    ...blob,
+    version: 3,
+    vehicles: blob.vehicles.map((v) => ({
+      ...v,
+      history: (v.history ?? []).map((h) => {
+        if (!h.partId) return h
+        const { partId, catalogueId, ...rest } = h
+        const parts = Array.isArray(v.parts) ? v.parts : []
+        const resolved = catalogueId ?? parts.find((p) => p.id === partId)?.catalogueId
+        return resolved ? { ...rest, partRefs: [{ partId, catalogueId: resolved }] } : rest
+      }),
     })),
   }),
 }

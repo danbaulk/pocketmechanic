@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { getHistory } from './history.ts'
+import { entryDetail, getHistory } from './history.ts'
 import type { HistoryEntry, Vehicle } from './types.ts'
 
 function vehicleWith(history: HistoryEntry[]): Vehicle {
@@ -35,5 +35,22 @@ describe('getHistory', () => {
     ]
     getHistory(vehicleWith(entries))
     expect(entries.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('entryDetail', () => {
+  it('lists the replaced parts by catalogue name, plus MOT result and note', () => {
+    const entry: HistoryEntry = {
+      id: 'e', kind: 'mot', date: '2026-01-01', mileage: 60_000, motResult: 'pass',
+      note: 'advisory: tyres', partRefs: [
+        { partId: 'p1', catalogueId: 'brake-pads-front' },
+        { partId: 'p2', catalogueId: 'brake-discs-front' },
+      ],
+    }
+    expect(entryDetail(entry)).toBe('Replaced: Front brake pads, Front brake discs · Passed · advisory: tyres')
+  })
+
+  it('is null for a bare entry', () => {
+    expect(entryDetail({ id: 'e', kind: 'service', date: '2026-01-01', mileage: 60_000 })).toBeNull()
   })
 })

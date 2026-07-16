@@ -1,4 +1,4 @@
-import type { FittedPart, RAG, Vehicle } from './types.ts'
+import type { FittedPart, HistoryEntry, RAG, Vehicle } from './types.ts'
 import { getCataloguePart, ZONE_ORDER, type CataloguePart, type PartZone } from './data/partsCatalogue.ts'
 
 /**
@@ -17,6 +17,26 @@ export function daysBetween(from: Date, to: Date): number {
 /** An un-dated part is assumed original: fitted from new (0 miles) at the car's year start. */
 export function originalFitment(year: number): { fitDate: string; fitMileage: number } {
   return { fitDate: `${year}-01-01`, fitMileage: 0 }
+}
+
+/**
+ * A part's effective wear-clock anchor, derived from history: the most recent job that
+ * replaced it (latest by date; same-date ties resolve to the later-added entry, matching
+ * `getHistory`). Only entries carrying a mileage can re-anchor the clock. Falls back to the
+ * part's own recorded fitment when no job has replaced it.
+ */
+export function effectiveFitment(
+  part: FittedPart,
+  history: HistoryEntry[],
+): { fitDate: string | null; fitMileage: number | null } {
+  let best: { date: string; mileage: number } | null = null
+  for (const entry of history) {
+    if (entry.mileage === null) continue
+    if (!entry.partRefs?.some((r) => r.partId === part.id)) continue
+    if (best === null || entry.date >= best.date) best = { date: entry.date, mileage: entry.mileage }
+  }
+  if (best) return { fitDate: best.date, fitMileage: best.mileage }
+  return { fitDate: part.fitDate, fitMileage: part.fitMileage }
 }
 
 /**
@@ -95,7 +115,10 @@ function allPartsWithHealth(vehicle: Vehicle, now: Date): PartWithHealth[] {
   for (const part of vehicle.parts) {
     const cat = getCataloguePart(part.catalogueId)
     if (!cat) continue // catalogueId no longer in the catalogue (e.g. removed part)
-    out.push({ part, cat, health: computePartHealth(part, cat, currentMileage, now) })
+    // Health runs against the part's effective fitment (latest replacement job), not its
+    // originally-recorded one — so editing/deleting a job re-derives its parts' health.
+    const eff = effectiveFitment(part, vehicle.history)
+    out.push({ part, cat, health: computePartHealth({ ...part, ...eff }, cat, currentMileage, now) })
   }
   return out
 }

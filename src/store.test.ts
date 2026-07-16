@@ -2,12 +2,22 @@ import { describe, it, expect } from 'vitest'
 import { garageReducer, type Action } from './reducer.ts'
 import { defaultState, normalizeState } from './storage.ts'
 import { PART_CATALOGUE } from './data/partsCatalogue.ts'
-import { computePartHealth } from './health.ts'
-import { getCataloguePart } from './data/partsCatalogue.ts'
-import type { AppState } from './types.ts'
+import { getPartsByZone } from './health.ts'
+import type { AppState, RAG, Vehicle } from './types.ts'
 
 function run(state: AppState, ...actions: Action[]): AppState {
   return actions.reduce(garageReducer, state)
+}
+
+const NOW = new Date('2026-07-04T12:00:00Z')
+
+/** The derived RAG of a vehicle's part by catalogue slug (health flows from history). */
+function ragOf(v: Vehicle, catalogueId: string): RAG {
+  for (const zone of getPartsByZone(v, NOW)) {
+    const found = zone.parts.find((p) => p.cat.id === catalogueId)
+    if (found) return found.health.rag
+  }
+  throw new Error(`no part ${catalogueId}`)
 }
 
 const NEW_CAR: Action = {
@@ -33,28 +43,6 @@ describe('addVehicle', () => {
   })
 })
 
-describe('setPartFitment', () => {
-  it('records fitment (part becomes known and green) and re-setting resets the clock', () => {
-    let s = run(defaultState(), NEW_CAR)
-    const v = s.vehicles[0]
-    const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
-    const cat = getCataloguePart('brake-pads-front')!
-    const now = new Date('2026-07-04T12:00:00Z')
-
-    // Fitted long ago at low mileage → red.
-    s = run(s, { type: 'setPartFitment', vehicleId: v.id, partId: pads.id, fitDate: '2016-01-01', fitMileage: 20_000 })
-    let p = s.vehicles[0].parts.find((x) => x.id === pads.id)!
-    expect(computePartHealth(p, cat, 54_200, now).rag).toBe('red')
-
-    // "Replaced" today at current mileage → resets to green.
-    s = run(s, { type: 'setPartFitment', vehicleId: v.id, partId: pads.id, fitDate: '2026-07-04', fitMileage: 54_200 })
-    p = s.vehicles[0].parts.find((x) => x.id === pads.id)!
-    const h = computePartHealth(p, cat, 54_200, now)
-    expect(h.known).toBe(true)
-    expect(h.rag).toBe('green')
-  })
-})
-
 describe('recordReading', () => {
   it('re-anchors the odometer and logs a reading entry', () => {
     let s = run(defaultState(), NEW_CAR)
@@ -75,30 +63,52 @@ describe('recordReading', () => {
   })
 })
 
-describe('replacePart', () => {
-  it('logs a replacement entry and resets the clock to green', () => {
+describe('replacing parts as part of a job', () => {
+  // A part seeded as fitted-from-new in 2018 is well through its life by 54k miles.
+  it('addHistoryEntry with partIds denormalises partRefs and resets the part to green', () => {
     let s = run(defaultState(), NEW_CAR)
     const v = s.vehicles[0]
     const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
-    const cat = getCataloguePart('brake-pads-front')!
-    const now = new Date('2026-07-04T12:00:00Z')
+    expect(ragOf(v, 'brake-pads-front')).toBe('red')
 
-    // Old fitment → red (silent set, no log).
-    s = run(s, { type: 'setPartFitment', vehicleId: v.id, partId: pads.id, fitDate: '2016-01-01', fitMileage: 20_000 })
-    const before = s.vehicles[0].history.length
-
-    // Log a replacement today → resets to green and appends one entry.
-    s = run(s, { type: 'replacePart', vehicleId: v.id, partId: pads.id, fitDate: '2026-07-04', fitMileage: 54_200, note: 'new pads' })
-    const v2 = s.vehicles[0]
-    const p = v2.parts.find((x) => x.id === pads.id)!
-    expect(computePartHealth(p, cat, 54_200, now).rag).toBe('green')
-    expect(v2.history).toHaveLength(before + 1)
-    expect(v2.history.at(-1)).toMatchObject({
-      kind: 'replacement',
-      partId: pads.id,
-      catalogueId: 'brake-pads-front',
-      note: 'new pads',
+    s = run(s, {
+      type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-07-04', mileage: 54_200,
+      note: 'front pads', partIds: [pads.id],
     })
+    const v2 = s.vehicles[0]
+    expect(ragOf(v2, 'brake-pads-front')).toBe('green')
+    expect(v2.history.at(-1)).toMatchObject({
+      kind: 'service',
+      note: 'front pads',
+      partRefs: [{ partId: pads.id, catalogueId: 'brake-pads-front' }],
+    })
+  })
+
+  it('updateHistoryEntry re-deriving fitment (untick the part) reverts its health', () => {
+    let s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
+    s = run(s, { type: 'addHistoryEntry', vehicleId: v.id, kind: 'repair', date: '2026-07-04', mileage: 54_200, partIds: [pads.id] })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('green')
+
+    // Edit the entry to no longer include the part → its clock falls back to the seeded fitment.
+    s = run(s, { type: 'updateHistoryEntry', vehicleId: v.id, entryId, kind: 'repair', date: '2026-07-04', mileage: 54_200, partIds: [] })
+    const edited = s.vehicles[0].history.find((h) => h.id === entryId)!
+    expect(edited.partRefs).toBeUndefined()
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('red')
+  })
+
+  it('removeHistoryEntry reverts a part that job had replaced', () => {
+    let s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    const pads = v.parts.find((p) => p.catalogueId === 'brake-pads-front')!
+    s = run(s, { type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-07-04', mileage: 54_200, partIds: [pads.id] })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('green')
+
+    s = run(s, { type: 'removeHistoryEntry', vehicleId: v.id, entryId })
+    expect(ragOf(s.vehicles[0], 'brake-pads-front')).toBe('red')
   })
 })
 
@@ -224,13 +234,39 @@ describe('storage normalizeState', () => {
       ],
     }
     const migrated = normalizeState(v1)!
-    expect(migrated.version).toBe(2)
+    expect(migrated.version).toBe(3)
     const v = migrated.vehicles[0]
     expect(v).toMatchObject({ make: 'VW', model: 'Golf', avgAnnualMiles: 8000 })
     expect(v.history).toEqual([
       expect.objectContaining({ kind: 'reading', mileage: 80_000, date: '2025-01-01' }),
     ])
     expect(migrated.activeVehicleId).toBe('car-1')
+  })
+
+  it('migrates a v2 blob: rewrites a legacy replacement partId to partRefs', () => {
+    const v2 = {
+      version: 2,
+      activeVehicleId: 'car-1',
+      vehicles: [
+        {
+          id: 'car-1', make: 'VW', model: 'Golf', year: 2015,
+          lastReadingMiles: 80_000, lastReadingDate: '2025-01-01', avgAnnualMiles: 8000,
+          parts: [{ id: 'p1', catalogueId: 'brake-pads-front', fitDate: '2020-01-01', fitMileage: 40_000 }],
+          history: [
+            { id: 'h1', kind: 'reading', date: '2025-01-01', mileage: 80_000 },
+            // Legacy single-part replacement: catalogueId denormalised on the entry.
+            { id: 'h2', kind: 'replacement', date: '2024-06-01', mileage: 70_000, partId: 'p1', catalogueId: 'brake-pads-front' },
+          ],
+        },
+      ],
+    }
+    const migrated = normalizeState(v2)!
+    expect(migrated.version).toBe(3)
+    const entry = migrated.vehicles[0].history.find((h) => h.id === 'h2')!
+    expect(entry.partRefs).toEqual([{ partId: 'p1', catalogueId: 'brake-pads-front' }])
+    expect('partId' in entry).toBe(false)
+    // Untouched entries pass through.
+    expect(migrated.vehicles[0].history.find((h) => h.id === 'h1')).toMatchObject({ kind: 'reading' })
   })
 
   it('heals a v2 vehicle missing its history array', () => {

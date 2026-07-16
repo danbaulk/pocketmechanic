@@ -191,7 +191,6 @@ function PartChecklistRow({ cat, draft, onChange }: { cat: CataloguePart; draft:
           className="h-4 w-4 shrink-0 rounded border-slate-300"
         />
         <span className="flex-1 text-sm font-medium text-slate-900">{cat.name}</span>
-        {isExisting && draft.on && <span className="text-xs text-slate-400">fitment set in list</span>}
       </label>
 
       {isNewAdd && (

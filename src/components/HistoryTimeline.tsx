@@ -1,7 +1,8 @@
-import type { HistoryKind, Vehicle } from '../types.ts'
-import { useGarage } from '../garageContext.ts'
+import { useEffect, useRef, useState } from 'react'
+import type { HistoryEntry, HistoryKind, Vehicle } from '../types.ts'
 import { entryDetail, getHistory, HISTORY_KIND_META } from '../history.ts'
 import { formatDate, formatMiles } from '../format.ts'
+import { HistoryEntryForm } from './HistoryEntryForm.tsx'
 
 const KIND_BADGE: Record<HistoryKind, string> = {
   service: 'bg-sky-50 text-sky-700 ring-sky-200',
@@ -11,9 +12,23 @@ const KIND_BADGE: Record<HistoryKind, string> = {
   reading: 'bg-slate-100 text-slate-600 ring-slate-200',
 }
 
-export function HistoryTimeline({ vehicle }: { vehicle: Vehicle }) {
-  const { dispatch } = useGarage()
+/** A request to focus a history entry's row. `n` changes on every jump so repeats re-trigger. */
+export type EntryFocus = { entryId: string; n: number }
+
+export function HistoryTimeline({ vehicle, focus }: { vehicle: Vehicle; focus?: EntryFocus | null }) {
   const entries = getHistory(vehicle)
+  const [editing, setEditing] = useState<HistoryEntry | null>(null)
+
+  // Scroll a jumped-to entry into view and briefly highlight it (mirrors PartsList's zone focus).
+  const rows = useRef(new Map<string, HTMLLIElement | null>())
+  const [highlighted, setHighlighted] = useState<string | null>(null)
+  useEffect(() => {
+    if (!focus) return
+    rows.current.get(focus.entryId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    setHighlighted(focus.entryId)
+    const timer = setTimeout(() => setHighlighted(null), 1500)
+    return () => clearTimeout(timer)
+  }, [focus])
 
   return (
     <section className="space-y-3">
@@ -36,8 +51,10 @@ export function HistoryTimeline({ vehicle }: { vehicle: Vehicle }) {
         <ul className="divide-y divide-slate-100 overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200">
           {entries.map((entry) => {
             const detail = entryDetail(entry)
-            return (
-              <li key={entry.id} className="flex items-start gap-3 px-4 py-3">
+            // Odometer readings are managed via "Update mileage", not edited here.
+            const editable = entry.kind !== 'reading'
+            const body = (
+              <>
                 <span
                   className={`mt-0.5 shrink-0 rounded-full px-2 py-0.5 text-xs font-medium ring-1 ${KIND_BADGE[entry.kind]}`}
                 >
@@ -52,18 +69,35 @@ export function HistoryTimeline({ vehicle }: { vehicle: Vehicle }) {
                   </div>
                   {detail && <p className="mt-0.5 truncate text-sm text-slate-500">{detail}</p>}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => dispatch({ type: 'removeHistoryEntry', vehicleId: vehicle.id, entryId: entry.id })}
-                  className="shrink-0 rounded-md px-2 py-1 text-xs text-slate-400 hover:bg-slate-100 hover:text-red-600"
-                  aria-label="Delete entry"
-                >
-                  Delete
-                </button>
+              </>
+            )
+            return (
+              <li
+                key={entry.id}
+                ref={(el) => {
+                  rows.current.set(entry.id, el)
+                }}
+                className={`transition-colors ${highlighted === entry.id ? 'bg-sky-50' : ''}`}
+              >
+                {editable ? (
+                  <button
+                    type="button"
+                    onClick={() => setEditing(entry)}
+                    className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-slate-50"
+                  >
+                    {body}
+                  </button>
+                ) : (
+                  <div className="flex items-start gap-3 px-4 py-3">{body}</div>
+                )}
               </li>
             )
           })}
         </ul>
+      )}
+
+      {editing && (
+        <HistoryEntryForm vehicle={vehicle} entry={editing} onClose={() => setEditing(null)} />
       )}
     </section>
   )

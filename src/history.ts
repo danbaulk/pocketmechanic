@@ -31,8 +31,9 @@ export const HISTORY_KIND_META: Record<HistoryKind, { label: string; description
  */
 export function entryDetail(entry: HistoryEntry): string | null {
   const parts: string[] = []
-  if (entry.kind === 'replacement' && entry.catalogueId) {
-    parts.push(getCataloguePart(entry.catalogueId)?.name ?? 'Part replaced')
+  if (entry.partRefs?.length) {
+    const names = entry.partRefs.map((r) => getCataloguePart(r.catalogueId)?.name ?? 'part')
+    parts.push(`Replaced: ${names.join(', ')}`)
   }
   if (entry.kind === 'mot' && entry.motResult) {
     parts.push(entry.motResult === 'pass' ? 'Passed' : 'Failed')

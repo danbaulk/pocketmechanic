@@ -11,6 +11,12 @@ export type FittedPart = {
 /** A kind of dated event on a vehicle's history timeline. */
 export type HistoryKind = 'service' | 'mot' | 'repair' | 'replacement' | 'reading'
 
+/**
+ * A part replaced by a history entry. The `catalogueId` is denormalised so the timeline
+ * still renders the part's name if the FittedPart is later removed from the vehicle.
+ */
+export type PartRef = { partId: string; catalogueId: string }
+
 /** One dated entry in a vehicle's service/MOT/repair/reading history. */
 export type HistoryEntry = {
   id: string
@@ -18,9 +24,8 @@ export type HistoryEntry = {
   date: string // ISO date (yyyy-mm-dd)
   mileage: number | null // odometer at the event, if known
   note?: string // service description / MOT advisories / repair detail
-  // replacement-only:
-  partId?: string // the FittedPart replaced
-  catalogueId?: string // denormalised so the timeline still renders if the part is later removed
+  // the parts this job replaced (resets each one's wear clock to this entry's date/mileage):
+  partRefs?: PartRef[]
   // mot-only:
   motResult?: 'pass' | 'fail'
 }
@@ -43,7 +48,7 @@ export type Vehicle = {
 }
 
 export type AppState = {
-  version: 2 // schema version — bump + migrate in storage.ts on shape changes
+  version: 3 // schema version — bump + migrate in storage.ts on shape changes
   vehicles: Vehicle[]
   activeVehicleId: string | null
 }

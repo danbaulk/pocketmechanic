@@ -1,4 +1,4 @@
-import type { AppState, FittedPart, HistoryEntry, Vehicle } from './types.ts'
+import type { AppState, FittedPart, HistoryEntry, PartRef, Vehicle } from './types.ts'
 import { PART_CATALOGUE } from './data/partsCatalogue.ts'
 import { originalFitment } from './health.ts'
 
@@ -23,9 +23,8 @@ export type Action =
   | { type: 'deleteVehicle'; id: string }
   | { type: 'setActiveVehicle'; id: string }
   | { type: 'recordReading'; vehicleId: string; miles: number; date: string }
-  | { type: 'setPartFitment'; vehicleId: string; partId: string; fitDate: string; fitMileage: number }
-  | { type: 'replacePart'; vehicleId: string; partId: string; fitDate: string; fitMileage: number; note?: string }
-  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail' }
+  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
+  | { type: 'updateHistoryEntry'; vehicleId: string; entryId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
   | { type: 'removeHistoryEntry'; vehicleId: string; entryId: string }
   | { type: 'addPart'; vehicleId: string; catalogueId: string; fitDate: string | null; fitMileage: number | null }
   | { type: 'removePart'; vehicleId: string; partId: string }
@@ -54,6 +53,42 @@ function updateVehicle(state: AppState, id: string, fn: (v: Vehicle) => Vehicle)
 function reAnchor(v: Vehicle, miles: number | null, date: string): Vehicle {
   if (miles === null || date < v.lastReadingDate) return v
   return { ...v, lastReadingMiles: miles, lastReadingDate: date }
+}
+
+/** Resolve the parts a job replaced into denormalised `PartRef`s (unknown ids are dropped). */
+function partRefsFor(v: Vehicle, partIds: string[] | undefined): PartRef[] {
+  if (!partIds?.length) return []
+  const refs: PartRef[] = []
+  for (const partId of partIds) {
+    const part = v.parts.find((p) => p.id === partId)
+    if (part) refs.push({ partId, catalogueId: part.catalogueId })
+  }
+  return refs
+}
+
+/** Build a service/MOT/repair history entry from job fields, denormalising its replaced parts. */
+function buildJobEntry(
+  v: Vehicle,
+  id: string,
+  fields: {
+    kind: 'service' | 'mot' | 'repair'
+    date: string
+    mileage: number | null
+    note?: string
+    motResult?: 'pass' | 'fail'
+    partIds?: string[]
+  },
+): HistoryEntry {
+  const partRefs = partRefsFor(v, fields.partIds)
+  return {
+    id,
+    kind: fields.kind,
+    date: fields.date,
+    mileage: fields.mileage,
+    ...(fields.note?.trim() ? { note: fields.note.trim() } : {}),
+    ...(fields.motResult && fields.kind === 'mot' ? { motResult: fields.motResult } : {}),
+    ...(partRefs.length ? { partRefs } : {}),
+  }
 }
 
 export function garageReducer(state: AppState, action: Action): AppState {
@@ -95,45 +130,17 @@ export function garageReducer(state: AppState, action: Action): AppState {
         return reAnchor({ ...v, history: [...v.history, entry] }, action.miles, action.date)
       })
 
-    case 'setPartFitment':
-      return updateVehicle(state, action.vehicleId, (v) => ({
-        ...v,
-        parts: v.parts.map((p) =>
-          p.id === action.partId
-            ? { ...p, fitDate: action.fitDate, fitMileage: action.fitMileage }
-            : p,
-        ),
-      }))
-
-    case 'replacePart':
-      return updateVehicle(state, action.vehicleId, (v) => {
-        const part = v.parts.find((p) => p.id === action.partId)
-        const entry: HistoryEntry = {
-          id: uid(),
-          kind: 'replacement',
-          date: action.fitDate,
-          mileage: action.fitMileage,
-          partId: action.partId,
-          ...(part ? { catalogueId: part.catalogueId } : {}),
-          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
-        }
-        const parts = v.parts.map((p) =>
-          p.id === action.partId ? { ...p, fitDate: action.fitDate, fitMileage: action.fitMileage } : p,
-        )
-        return reAnchor({ ...v, parts, history: [...v.history, entry] }, action.fitMileage, action.fitDate)
-      })
-
     case 'addHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
-        const entry: HistoryEntry = {
-          id: uid(),
-          kind: action.kind,
-          date: action.date,
-          mileage: action.mileage,
-          ...(action.note?.trim() ? { note: action.note.trim() } : {}),
-          ...(action.motResult ? { motResult: action.motResult } : {}),
-        }
+        const entry = buildJobEntry(v, uid(), action)
         return reAnchor({ ...v, history: [...v.history, entry] }, action.mileage, action.date)
+      })
+
+    case 'updateHistoryEntry':
+      return updateVehicle(state, action.vehicleId, (v) => {
+        const entry = buildJobEntry(v, action.entryId, action)
+        const history = v.history.map((h) => (h.id === action.entryId ? entry : h))
+        return reAnchor({ ...v, history }, action.mileage, action.date)
       })
 
     case 'removeHistoryEntry':
