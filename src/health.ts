@@ -22,21 +22,25 @@ export function originalFitment(year: number): { fitDate: string; fitMileage: nu
 /**
  * A part's effective wear-clock anchor, derived from history: the most recent job that
  * replaced it (latest by date; same-date ties resolve to the later-added entry, matching
- * `getHistory`). Only entries carrying a mileage can re-anchor the clock. Falls back to the
- * part's own recorded fitment when no job has replaced it.
+ * `getHistory`). Only entries carrying a mileage can re-anchor the clock. The part's own
+ * recorded fitment acts as a floor - it wins when it is newer than every such job, so
+ * back-filling old history can't age a part that was fitted more recently - and is the
+ * fallback when no job has replaced it.
  */
 export function effectiveFitment(
   part: FittedPart,
   history: HistoryEntry[],
 ): { fitDate: string | null; fitMileage: number | null } {
+  const own = { fitDate: part.fitDate, fitMileage: part.fitMileage }
   let best: { date: string; mileage: number } | null = null
   for (const entry of history) {
     if (entry.mileage === null) continue
     if (!entry.partRefs?.some((r) => r.partId === part.id)) continue
     if (best === null || entry.date >= best.date) best = { date: entry.date, mileage: entry.mileage }
   }
-  if (best) return { fitDate: best.date, fitMileage: best.mileage }
-  return { fitDate: part.fitDate, fitMileage: part.fitMileage }
+  if (best === null) return own
+  if (own.fitDate !== null && own.fitMileage !== null && own.fitDate > best.date) return own
+  return { fitDate: best.date, fitMileage: best.mileage }
 }
 
 /**

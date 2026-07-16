@@ -154,6 +154,15 @@ describe('effectiveFitment', () => {
     expect(effectiveFitment(p, history)).toEqual({ fitDate: '2020-01-01', fitMileage: 40_000 })
   })
 
+  it("keeps the part's own fitment when it is newer than every job", () => {
+    // Part fitted 2026; history back-filled with an older job that also replaced it.
+    const fresh = part({ id: 'p1', fitDate: '2026-01-01', fitMileage: 78_000 })
+    const history: HistoryEntry[] = [
+      { id: 'h1', kind: 'repair', date: '2020-01-01', mileage: 30_000, partRefs: ref },
+    ]
+    expect(effectiveFitment(fresh, history)).toEqual({ fitDate: '2026-01-01', fitMileage: 78_000 })
+  })
+
   it('ignores replacement entries that carry no mileage', () => {
     const history: HistoryEntry[] = [
       { id: 'h1', kind: 'mot', date: '2025-01-01', mileage: null, partRefs: ref },
