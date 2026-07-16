@@ -1,22 +1,16 @@
 import { useState } from 'react'
 import type { Vehicle } from '../types.ts'
-import { HISTORY_KIND_META } from '../history.ts'
-import { Modal } from './Modal.tsx'
 import { ReadingForm } from './ReadingForm.tsx'
-import { HistoryEntryForm, type EntryKind } from './HistoryEntryForm.tsx'
+import { HistoryEntryForm } from './HistoryEntryForm.tsx'
 
-type Mode = null | 'menu' | 'reading' | EntryKind
+type Mode = null | 'reading' | 'log'
 
-const CHOICES: { mode: Exclude<Mode, null | 'menu'>; label: string; hint: string }[] = [
-  { mode: 'reading', label: 'Update mileage', hint: 'Record an actual odometer reading' },
-  { mode: 'service', label: 'Log service', hint: HISTORY_KIND_META.service.description },
-  { mode: 'mot', label: 'Log MOT', hint: HISTORY_KIND_META.mot.description },
-  { mode: 'repair', label: 'Log repair', hint: HISTORY_KIND_META.repair.description },
-]
+const btnClass = 'rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50'
 
 /**
- * The single "+ Log" entry point on the diagram card. Opens a chooser sheet, then the
- * relevant form: an odometer reading (`ReadingForm`) or a history entry (`HistoryEntryForm`).
+ * The record-keeping actions on the diagram card: "Update mileage" opens the odometer form
+ * (`ReadingForm`) directly, and "+ Log" opens the service/MOT/repair form (`HistoryEntryForm`,
+ * which carries its own kind toggle) directly.
  */
 export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
   const [mode, setMode] = useState<Mode>(null)
@@ -24,36 +18,15 @@ export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
 
   return (
     <>
-      <button
-        type="button"
-        onClick={() => setMode('menu')}
-        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
-      >
+      <button type="button" onClick={() => setMode('reading')} className={btnClass}>
+        Update mileage
+      </button>
+      <button type="button" onClick={() => setMode('log')} className={btnClass}>
         + Log
       </button>
 
-      {mode === 'menu' && (
-        <Modal title="Add to record" onClose={close}>
-          <div className="space-y-2">
-            {CHOICES.map((c) => (
-              <button
-                key={c.mode}
-                type="button"
-                onClick={() => setMode(c.mode)}
-                className="w-full rounded-lg border border-slate-300 px-4 py-3 text-left hover:bg-slate-50"
-              >
-                <div className="font-medium text-slate-900">{c.label}</div>
-                <div className="text-xs text-slate-400">{c.hint}</div>
-              </button>
-            ))}
-          </div>
-        </Modal>
-      )}
-
       {mode === 'reading' && <ReadingForm vehicle={vehicle} onClose={close} />}
-      {(mode === 'service' || mode === 'mot' || mode === 'repair') && (
-        <HistoryEntryForm vehicle={vehicle} initialKind={mode} onClose={close} />
-      )}
+      {mode === 'log' && <HistoryEntryForm vehicle={vehicle} onClose={close} />}
     </>
   )
 }
