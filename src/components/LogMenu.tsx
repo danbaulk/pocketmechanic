@@ -2,10 +2,9 @@ import { useState } from 'react'
 import type { Vehicle } from '../types.ts'
 import { ReadingForm } from './ReadingForm.tsx'
 import { HistoryEntryForm } from './HistoryEntryForm.tsx'
+import { secondaryBtnClass } from './Modal.tsx'
 
 type Mode = null | 'reading' | 'log'
-
-const btnClass = 'rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50'
 
 /**
  * The record-keeping actions on the diagram card: "Update mileage" opens the odometer form
@@ -18,10 +17,10 @@ export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
 
   return (
     <>
-      <button type="button" onClick={() => setMode('reading')} className={btnClass}>
+      <button type="button" onClick={() => setMode('reading')} className={secondaryBtnClass}>
         Update mileage
       </button>
-      <button type="button" onClick={() => setMode('log')} className={btnClass}>
+      <button type="button" onClick={() => setMode('log')} className={secondaryBtnClass}>
         Log
       </button>
 

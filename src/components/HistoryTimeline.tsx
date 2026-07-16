@@ -3,6 +3,7 @@ import type { HistoryEntry, HistoryKind, Vehicle } from '../types.ts'
 import { entryDetail, getHistory, HISTORY_KIND_META } from '../history.ts'
 import { formatDate, formatMiles } from '../format.ts'
 import { HistoryEntryForm } from './HistoryEntryForm.tsx'
+import { secondaryBtnClass } from './Modal.tsx'
 
 const KIND_BADGE: Record<HistoryKind, string> = {
   service: 'bg-sky-50 text-sky-700 ring-sky-200',
@@ -37,7 +38,7 @@ export function HistoryTimeline({ vehicle, focus }: { vehicle: Vehicle; focus?: 
         <button
           type="button"
           onClick={() => window.print()}
-          className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+          className={secondaryBtnClass}
         >
           Print
         </button>

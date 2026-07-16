@@ -7,7 +7,7 @@ import { getCataloguePart } from '../data/partsCatalogue.ts'
 import { formatMiles, todayISO } from '../format.ts'
 import { Modal, fieldClass, labelClass, primaryBtnClass } from './Modal.tsx'
 
-export type EntryKind = 'service' | 'mot' | 'repair'
+type EntryKind = 'service' | 'mot' | 'repair'
 const KINDS: EntryKind[] = ['service', 'mot', 'repair']
 
 /** A legacy 'replacement' entry edits as a repair (the closest of the three job kinds). */
@@ -23,18 +23,16 @@ function toEntryKind(kind: HistoryEntry['kind']): EntryKind {
 export function HistoryEntryForm({
   vehicle,
   onClose,
-  initialKind = 'service',
   entry,
 }: {
   vehicle: Vehicle
   onClose: () => void
-  initialKind?: EntryKind
   entry?: HistoryEntry
 }) {
   const { dispatch } = useGarage()
   const editing = entry !== undefined
 
-  const [kind, setKind] = useState<EntryKind>(entry ? toEntryKind(entry.kind) : initialKind)
+  const [kind, setKind] = useState<EntryKind>(entry ? toEntryKind(entry.kind) : 'service')
   const [date, setDate] = useState(entry ? entry.date : todayISO())
   const [mileage, setMileage] = useState(
     entry ? (entry.mileage === null ? '' : String(entry.mileage)) : String(estimateCurrentMileage(vehicle, new Date())),

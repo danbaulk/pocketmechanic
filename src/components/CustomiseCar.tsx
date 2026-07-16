@@ -4,7 +4,7 @@ import { useGarage } from '../garageContext.ts'
 import { PART_CATALOGUE, ZONE_ORDER, type CataloguePart } from '../data/partsCatalogue.ts'
 import { estimateCurrentMileage } from '../health.ts'
 import { todayISO } from '../format.ts'
-import { Modal, fieldClass, labelClass, primaryBtnClass } from './Modal.tsx'
+import { Modal, fieldClass, labelClass, primaryBtnClass, secondaryBtnClass } from './Modal.tsx'
 
 /** A car's editable details, kept as strings while the form is open. */
 type Details = { make: string; model: string; year: string; reg: string; avgAnnualMiles: string }
@@ -47,7 +47,7 @@ export function CustomiseCar({ vehicle }: { vehicle: Vehicle }) {
       <button
         type="button"
         onClick={() => setOpen(true)}
-        className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        className={secondaryBtnClass}
       >
         Customise
       </button>

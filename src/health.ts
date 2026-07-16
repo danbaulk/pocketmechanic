@@ -120,7 +120,7 @@ function allPartsWithHealth(vehicle: Vehicle, now: Date): PartWithHealth[] {
     const cat = getCataloguePart(part.catalogueId)
     if (!cat) continue // catalogueId no longer in the catalogue (e.g. removed part)
     // Health runs against the part's effective fitment (latest replacement job), not its
-    // originally-recorded one — so editing/deleting a job re-derives its parts' health.
+    // originally-recorded one - so editing/deleting a job re-derives its parts' health.
     const eff = effectiveFitment(part, vehicle.history)
     out.push({ part, cat, health: computePartHealth({ ...part, ...eff }, cat, currentMileage, now) })
   }

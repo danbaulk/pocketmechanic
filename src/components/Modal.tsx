@@ -41,3 +41,6 @@ export const fieldClass =
 export const labelClass = 'block text-sm font-medium text-slate-700 mb-1'
 export const primaryBtnClass =
   'w-full rounded-lg bg-sky-600 px-4 py-2.5 font-medium text-white shadow-sm hover:bg-sky-700 focus:outline-none focus:ring-2 focus:ring-sky-500 focus:ring-offset-1 disabled:opacity-50'
+/** The small outlined action buttons that sit on the cards (Customise, Update mileage, Log, Print). */
+export const secondaryBtnClass =
+  'rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50'

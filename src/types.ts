@@ -48,7 +48,7 @@ export type Vehicle = {
 }
 
 export type AppState = {
-  version: 3 // schema version — bump + migrate in storage.ts on shape changes
+  version: 3 // schema version - bump + migrate in storage.ts on shape changes
   vehicles: Vehicle[]
   activeVehicleId: string | null
 }

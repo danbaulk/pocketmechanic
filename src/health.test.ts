@@ -171,7 +171,7 @@ describe('effectiveFitment', () => {
   })
 })
 
-describe('getPartsByZone — derives health from replacement history', () => {
+describe('getPartsByZone - derives health from replacement history', () => {
   it('a job that replaces a worn part flips it to green', () => {
     const v: Vehicle = {
       id: 'v', make: 'A', model: 'B', year: 2018,
