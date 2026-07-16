@@ -1,6 +1,7 @@
 import type { AppState, FittedPart, HistoryEntry, PartRef, Vehicle } from './types.ts'
 import { PART_CATALOGUE } from './data/partsCatalogue.ts'
 import { originalFitment } from './health.ts'
+import { deriveAnchor } from './history.ts'
 
 export function uid(): string {
   return crypto.randomUUID()
@@ -46,22 +47,16 @@ function updateVehicle(state: AppState, id: string, fn: (v: Vehicle) => Vehicle)
 }
 
 /**
- * Derive the odometer anchor from history: the latest dated entry carrying a mileage (ties
- * resolve to the later-added one, matching `getHistory`). ISO yyyy-mm-dd dates compare
- * correctly as strings. Recomputed after every history change, so editing or deleting an
- * entry can never leave the estimate anchored to a reading that no longer exists - the same
- * derive-from-history rule that governs part fitment. Back-dating still can't drag the anchor
- * backwards, because a later entry keeps winning. Falls back to the existing anchor when no
- * entry carries a mileage at all.
+ * Re-anchor the odometer to whatever history now implies (see `deriveAnchor`). Called after
+ * every history change, so editing or deleting an entry can never leave the estimate anchored
+ * to a reading that no longer exists - the same derive-from-history rule that governs part
+ * fitment. Back-dating still can't drag the anchor backwards, because a later entry keeps
+ * winning. The existing anchor stands when no entry carries a mileage at all.
  */
 function recomputeAnchor(v: Vehicle): Vehicle {
-  let best: { date: string; miles: number } | null = null
-  for (const h of v.history) {
-    if (h.mileage === null) continue
-    if (best === null || h.date >= best.date) best = { date: h.date, miles: h.mileage }
-  }
-  if (best === null) return v
-  return { ...v, lastReadingMiles: best.miles, lastReadingDate: best.date }
+  const anchor = deriveAnchor(v.history)
+  if (anchor === null) return v
+  return { ...v, lastReadingMiles: anchor.miles, lastReadingDate: anchor.date }
 }
 
 /**

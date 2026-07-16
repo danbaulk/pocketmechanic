@@ -1,5 +1,6 @@
 import type { FittedPart, HistoryEntry, RAG, Vehicle } from './types.ts'
 import { getCataloguePart, ZONE_ORDER, type CataloguePart, type PartZone } from './data/partsCatalogue.ts'
+import { latestByDate } from './history.ts'
 
 /**
  * Fraction-of-life at which a part turns amber (flat 10%-remaining for every part).
@@ -21,23 +22,21 @@ export function originalFitment(year: number): { fitDate: string; fitMileage: nu
 
 /**
  * A part's effective wear-clock anchor, derived from history: the most recent job that
- * replaced it (latest by date; same-date ties resolve to the later-added entry, matching
- * `getHistory`). Only entries carrying a mileage can re-anchor the clock. The part's own
- * recorded fitment acts as a floor - it wins when it is newer than every such job, so
- * back-filling old history can't age a part that was fitted more recently - and is the
- * fallback when no job has replaced it.
+ * replaced it (the shared `latestByDate` rule). Only entries carrying a mileage can re-anchor
+ * the clock. The part's own recorded fitment acts as a floor - it wins when it is newer than
+ * every such job, so back-filling old history can't age a part that was fitted more recently -
+ * and is the fallback when no job has replaced it.
  */
 export function effectiveFitment(
   part: FittedPart,
   history: HistoryEntry[],
 ): { fitDate: string | null; fitMileage: number | null } {
   const own = { fitDate: part.fitDate, fitMileage: part.fitMileage }
-  let best: { date: string; mileage: number } | null = null
-  for (const entry of history) {
-    if (entry.mileage === null) continue
-    if (!entry.partRefs?.some((r) => r.partId === part.id)) continue
-    if (best === null || entry.date >= best.date) best = { date: entry.date, mileage: entry.mileage }
-  }
+  const jobs = history.filter(
+    (h): h is HistoryEntry & { mileage: number } =>
+      h.mileage !== null && (h.partRefs?.some((r) => r.partId === part.id) ?? false),
+  )
+  const best = latestByDate(jobs, (h) => h.date)
   if (best === null) return own
   if (own.fitDate !== null && own.fitMileage !== null && own.fitDate > best.date) return own
   return { fitDate: best.date, fitMileage: best.mileage }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { entryDetail, getHistory, minLoggableMileage } from './history.ts'
+import { deriveAnchor, entryDetail, getHistory, latestByDate, minLoggableMileage } from './history.ts'
 import type { HistoryEntry, Vehicle } from './types.ts'
 
 function vehicleWith(history: HistoryEntry[]): Vehicle {
@@ -35,6 +35,39 @@ describe('getHistory', () => {
     ]
     getHistory(vehicleWith(entries))
     expect(entries.map((e) => e.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('latestByDate', () => {
+  const items = [{ d: '2024-01-01', n: 1 }, { d: '2026-01-01', n: 2 }, { d: '2025-01-01', n: 3 }]
+
+  it('picks the latest date regardless of list order', () => {
+    expect(latestByDate(items, (i) => i.d)?.n).toBe(2)
+  })
+
+  it('resolves same-date ties to the later-added item', () => {
+    const tied = [{ d: '2026-01-01', n: 1 }, { d: '2026-01-01', n: 2 }]
+    expect(latestByDate(tied, (i) => i.d)?.n).toBe(2)
+  })
+
+  it('is null for an empty list', () => {
+    expect(latestByDate([], (i: { d: string }) => i.d)).toBeNull()
+  })
+})
+
+describe('deriveAnchor', () => {
+  it('takes the latest entry carrying a mileage, ignoring mileage-less ones', () => {
+    const history: HistoryEntry[] = [
+      { id: 'a', kind: 'reading', date: '2024-01-01', mileage: 40_000 },
+      { id: 'b', kind: 'service', date: '2026-01-01', mileage: 54_200 },
+      { id: 'c', kind: 'mot', date: '2026-06-01', mileage: null }, // newer, but no mileage
+    ]
+    expect(deriveAnchor(history)).toEqual({ miles: 54_200, date: '2026-01-01' })
+  })
+
+  it('is null when nothing carries a mileage, leaving the existing anchor to stand', () => {
+    expect(deriveAnchor([{ id: 'c', kind: 'mot', date: '2026-06-01', mileage: null }])).toBeNull()
+    expect(deriveAnchor([])).toBeNull()
   })
 })
 
