@@ -9,7 +9,7 @@ const btnClass = 'rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-me
 
 /**
  * The record-keeping actions on the diagram card: "Update mileage" opens the odometer form
- * (`ReadingForm`) directly, and "+ Log" opens the service/MOT/repair form (`HistoryEntryForm`,
+ * (`ReadingForm`) directly, and "Log" opens the service/MOT/repair form (`HistoryEntryForm`,
  * which carries its own kind toggle) directly.
  */
 export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
@@ -22,7 +22,7 @@ export function LogMenu({ vehicle }: { vehicle: Vehicle }) {
         Update mileage
       </button>
       <button type="button" onClick={() => setMode('log')} className={btnClass}>
-        + Log
+        Log
       </button>
 
       {mode === 'reading' && <ReadingForm vehicle={vehicle} onClose={close} />}
