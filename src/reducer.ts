@@ -46,13 +46,22 @@ function updateVehicle(state: AppState, id: string, fn: (v: Vehicle) => Vehicle)
 }
 
 /**
- * Move the odometer anchor to a newly-logged reading, but only when it is at least as
- * recent as the current anchor — so back-dating an event never drags the estimate
- * backwards. ISO yyyy-mm-dd dates compare correctly as strings.
+ * Derive the odometer anchor from history: the latest dated entry carrying a mileage (ties
+ * resolve to the later-added one, matching `getHistory`). ISO yyyy-mm-dd dates compare
+ * correctly as strings. Recomputed after every history change, so editing or deleting an
+ * entry can never leave the estimate anchored to a reading that no longer exists - the same
+ * derive-from-history rule that governs part fitment. Back-dating still can't drag the anchor
+ * backwards, because a later entry keeps winning. Falls back to the existing anchor when no
+ * entry carries a mileage at all.
  */
-function reAnchor(v: Vehicle, miles: number | null, date: string): Vehicle {
-  if (miles === null || date < v.lastReadingDate) return v
-  return { ...v, lastReadingMiles: miles, lastReadingDate: date }
+function recomputeAnchor(v: Vehicle): Vehicle {
+  let best: { date: string; miles: number } | null = null
+  for (const h of v.history) {
+    if (h.mileage === null) continue
+    if (best === null || h.date >= best.date) best = { date: h.date, miles: h.mileage }
+  }
+  if (best === null) return v
+  return { ...v, lastReadingMiles: best.miles, lastReadingDate: best.date }
 }
 
 /** Resolve the parts a job replaced into denormalised `PartRef`s (unknown ids are dropped). */
@@ -127,27 +136,26 @@ export function garageReducer(state: AppState, action: Action): AppState {
     case 'recordReading':
       return updateVehicle(state, action.vehicleId, (v) => {
         const entry: HistoryEntry = { id: uid(), kind: 'reading', date: action.date, mileage: action.miles }
-        return reAnchor({ ...v, history: [...v.history, entry] }, action.miles, action.date)
+        return recomputeAnchor({ ...v, history: [...v.history, entry] })
       })
 
     case 'addHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
         const entry = buildJobEntry(v, uid(), action)
-        return reAnchor({ ...v, history: [...v.history, entry] }, action.mileage, action.date)
+        return recomputeAnchor({ ...v, history: [...v.history, entry] })
       })
 
     case 'updateHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
         const entry = buildJobEntry(v, action.entryId, action)
         const history = v.history.map((h) => (h.id === action.entryId ? entry : h))
-        return reAnchor({ ...v, history }, action.mileage, action.date)
+        return recomputeAnchor({ ...v, history })
       })
 
     case 'removeHistoryEntry':
-      return updateVehicle(state, action.vehicleId, (v) => ({
-        ...v,
-        history: v.history.filter((h) => h.id !== action.entryId),
-      }))
+      return updateVehicle(state, action.vehicleId, (v) =>
+        recomputeAnchor({ ...v, history: v.history.filter((h) => h.id !== action.entryId) }),
+      )
 
     case 'addPart':
       return updateVehicle(state, action.vehicleId, (v) => {

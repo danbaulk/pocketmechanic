@@ -148,6 +148,43 @@ describe('removeHistoryEntry', () => {
     s = run(s, { type: 'removeHistoryEntry', vehicleId: v.id, entryId: seeded.id })
     expect(s.vehicles[0].history.find((h) => h.id === seeded.id)).toBeUndefined()
   })
+
+  it('re-derives the odometer anchor, so deleting a reading cannot strand the estimate', () => {
+    let s = run(defaultState(), NEW_CAR) // anchored 54,200 @ 2026-07-04
+    const v = s.vehicles[0]
+    s = run(s, { type: 'recordReading', vehicleId: v.id, miles: 99_000, date: '2026-08-01' })
+    expect(s.vehicles[0].lastReadingMiles).toBe(99_000)
+
+    const bogus = s.vehicles[0].history.at(-1)!.id
+    s = run(s, { type: 'removeHistoryEntry', vehicleId: v.id, entryId: bogus })
+    // Anchor falls back to the newest surviving reading rather than stranding at 99,000.
+    expect(s.vehicles[0].lastReadingMiles).toBe(54_200)
+    expect(s.vehicles[0].lastReadingDate).toBe('2026-07-04')
+  })
+})
+
+describe('anchor derivation', () => {
+  it('follows an edited entry down when its mileage is corrected', () => {
+    let s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    s = run(s, { type: 'addHistoryEntry', vehicleId: v.id, kind: 'service', date: '2026-09-01', mileage: 99_000 })
+    const entryId = s.vehicles[0].history.at(-1)!.id
+    expect(s.vehicles[0].lastReadingMiles).toBe(99_000)
+
+    // Typo corrected: the anchor must follow it, not stay at the phantom 99,000.
+    s = run(s, { type: 'updateHistoryEntry', vehicleId: v.id, entryId, kind: 'service', date: '2026-09-01', mileage: 59_000 })
+    expect(s.vehicles[0].lastReadingMiles).toBe(59_000)
+    expect(s.vehicles[0].lastReadingDate).toBe('2026-09-01')
+  })
+
+  it('keeps the anchor when no entry carries a mileage', () => {
+    let s = run(defaultState(), NEW_CAR)
+    const v = s.vehicles[0]
+    const seeded = v.history[0].id
+    s = run(s, { type: 'removeHistoryEntry', vehicleId: v.id, entryId: seeded })
+    // Nothing left to derive from - the existing anchor stands rather than resetting to zero.
+    expect(s.vehicles[0].lastReadingMiles).toBe(54_200)
+  })
 })
 
 describe('addPart / removePart', () => {
