@@ -2,9 +2,9 @@ import { useState } from 'react'
 import type { HistoryEntry, Vehicle } from '../types.ts'
 import { useGarage } from '../garageContext.ts'
 import { estimateCurrentMileage } from '../health.ts'
-import { HISTORY_KIND_META } from '../history.ts'
+import { HISTORY_KIND_META, minLoggableMileage } from '../history.ts'
 import { getCataloguePart } from '../data/partsCatalogue.ts'
-import { todayISO } from '../format.ts'
+import { formatMiles, todayISO } from '../format.ts'
 import { Modal, fieldClass, labelClass, primaryBtnClass } from './Modal.tsx'
 
 export type EntryKind = 'service' | 'mot' | 'repair'
@@ -60,7 +60,11 @@ export function HistoryEntryForm({
 
   const mileageNum = Number(mileage)
   const mileageEmpty = mileage.trim() === ''
-  const mileageValid = mileageEmpty || (Number.isFinite(mileageNum) && mileageNum >= 0)
+  // An odometer never goes backwards: an entry can't undercut a mileage already logged by its
+  // date. When editing, the entry itself is excluded so it doesn't constrain its own value.
+  const min = minLoggableMileage(vehicle.history, date, entry?.id)
+  const tooLow = !mileageEmpty && Number.isFinite(mileageNum) && mileageNum < min
+  const mileageValid = mileageEmpty || (Number.isFinite(mileageNum) && mileageNum >= min)
   // A replaced part needs a mileage to anchor its wear clock, so it becomes required.
   const mileageRequired = partIds.size > 0
   const valid = date !== '' && mileageValid && !(mileageRequired && mileageEmpty)
@@ -143,6 +147,9 @@ export function HistoryEntryForm({
         <div>
           <label className={labelClass}>Mileage{mileageRequired ? '' : ' (optional)'}</label>
           <input className={fieldClass} value={mileage} onChange={(e) => setMileage(e.target.value)} inputMode="numeric" />
+          {tooLow && (
+            <p className="mt-1 text-xs text-red-600">Can't be below {formatMiles(min)} - already logged by this date.</p>
+          )}
         </div>
         <div>
           <label className={labelClass}>Note (optional)</label>

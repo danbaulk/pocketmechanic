@@ -16,6 +16,20 @@ export function getHistory(vehicle: Vehicle): HistoryEntry[] {
     .map((x) => x.entry)
 }
 
+/**
+ * The lowest mileage a reading/entry dated `date` may carry, keeping the odometer monotonic:
+ * it can never sit below a mileage already logged on an equal-or-earlier date. `exceptId` skips
+ * the entry being edited so it doesn't constrain itself. Mileage-less entries are ignored.
+ */
+export function minLoggableMileage(history: HistoryEntry[], date: string, exceptId?: string): number {
+  let min = 0
+  for (const h of history) {
+    if (h.id === exceptId || h.mileage === null) continue
+    if (h.date <= date) min = Math.max(min, h.mileage)
+  }
+  return min
+}
+
 /** Display metadata per history kind; colour/icon classes live in the component layer. */
 export const HISTORY_KIND_META: Record<HistoryKind, { label: string; description: string }> = {
   service: { label: 'Service', description: 'Routine service or maintenance' },

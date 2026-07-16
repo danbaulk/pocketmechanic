@@ -2,7 +2,8 @@ import { useState } from 'react'
 import type { Vehicle } from '../types.ts'
 import { useGarage } from '../garageContext.ts'
 import { estimateCurrentMileage } from '../health.ts'
-import { todayISO } from '../format.ts'
+import { minLoggableMileage } from '../history.ts'
+import { formatMiles, todayISO } from '../format.ts'
 import { Modal, fieldClass, labelClass, primaryBtnClass } from './Modal.tsx'
 
 /** Record an actual odometer reading, re-anchoring the mileage estimate. Dispatches `recordReading`. */
@@ -12,7 +13,10 @@ export function ReadingForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
   const [date, setDate] = useState(todayISO())
 
   const milesNum = Number(miles)
-  const valid = Number.isFinite(milesNum) && milesNum >= 0 && date !== ''
+  // An odometer never goes backwards: a reading can't undercut one already logged by this date.
+  const min = minLoggableMileage(vehicle.history, date)
+  const tooLow = Number.isFinite(milesNum) && milesNum < min
+  const valid = Number.isFinite(milesNum) && milesNum >= min && date !== ''
 
   function submit(e: React.FormEvent) {
     e.preventDefault()
@@ -27,6 +31,9 @@ export function ReadingForm({ vehicle, onClose }: { vehicle: Vehicle; onClose: (
         <div>
           <label className={labelClass}>Current mileage</label>
           <input className={fieldClass} value={miles} onChange={(e) => setMiles(e.target.value)} inputMode="numeric" autoFocus />
+          {tooLow && (
+            <p className="mt-1 text-xs text-red-600">Can't be below {formatMiles(min)} - already logged by this date.</p>
+          )}
         </div>
         <div>
           <label className={labelClass}>Reading taken</label>
