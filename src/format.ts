@@ -1,4 +1,4 @@
-import type { Clock, PartHealth } from './health.ts'
+import { activeClock, type Clock, type PartHealth } from './health.ts'
 
 export function formatMiles(n: number): string {
   return `${Math.round(n).toLocaleString('en-GB')} mi`
@@ -51,20 +51,24 @@ function remainingText(clock: Clock): { text: string; overdue: boolean } | null 
 export function dueText(health: PartHealth): string {
   if (!health.known) return 'Fitment not recorded'
 
-  const clock = health.inspected ? health.inspected.extended : health.wear
+  const clock = activeClock(health)
   const left = remainingText(clock)
   if (!left) return clock.fraction >= 1 ? 'due now' : 'healthy'
   if (left.overdue) return `overdue by ${left.text}`
   return health.inspected ? `checked OK - due in ${left.text}` : `due in ${left.text}`
 }
 
+/** A clock's consumed fraction as a whole percentage. */
+function percentOf(clock: Clock): number {
+  return Math.max(0, Math.round(clock.fraction * 100))
+}
+
 /** How far through the part's active clock, as a percentage - what the progress bar fills to. */
 export function consumedPercent(health: PartHealth): number {
-  const clock = health.inspected ? health.inspected.extended : health.wear
-  return Math.max(0, Math.round(clock.fraction * 100))
+  return percentOf(activeClock(health))
 }
 
 /** How much of the part's nominal life it has genuinely used, ignoring any inspection. */
 export function wearPercent(health: PartHealth): number {
-  return Math.max(0, Math.round(health.wear.fraction * 100))
+  return percentOf(health.wear)
 }

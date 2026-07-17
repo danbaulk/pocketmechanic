@@ -121,7 +121,7 @@ function computeClock(
 }
 
 export type PartHealth = {
-  /** false when fit info is missing — the part renders as "needs info", no RAG. */
+  /** false when fit info is missing - the part renders as "needs info", no RAG. */
   known: boolean
   /** The signal to show. Reads the active clock (see `inspected`). */
   rag: RAG
@@ -142,9 +142,14 @@ function ragFor(fraction: number): RAG {
   return 'green'
 }
 
-/** The fraction of the part's active clock - its extended life if inspected, else its wear. */
+/** The clock that drives a part's signal and display order: its extended life if inspected, else its wear. */
+export function activeClock(health: PartHealth): Clock {
+  return health.inspected ? health.inspected.extended : health.wear
+}
+
+/** The fraction of the part's active clock. */
 function urgency(health: PartHealth): number {
-  return health.inspected ? health.inspected.extended.fraction : health.wear.fraction
+  return activeClock(health).fraction
 }
 
 /**
@@ -224,21 +229,6 @@ function sortForDisplay(items: PartWithHealth[]): PartWithHealth[] {
   return [...known, ...needsInfo]
 }
 
-/**
- * Every fitted part split into parts with known fitment (sorted soonest-due first) and
- * parts still needing info. Parts whose catalogueId is unknown are dropped.
- */
-export function getPartsWithHealth(
-  vehicle: Vehicle,
-  now: Date,
-): { known: PartWithHealth[]; needsInfo: PartWithHealth[] } {
-  const all = allPartsWithHealth(vehicle, now)
-  return {
-    known: all.filter((i) => i.health.known).sort((a, b) => urgency(b.health) - urgency(a.health)),
-    needsInfo: all.filter((i) => !i.health.known).sort((a, b) => a.cat.name.localeCompare(b.cat.name)),
-  }
-}
-
 export type ZoneGroup = {
   zone: PartZone
   parts: PartWithHealth[] // known first (soonest-due), then needs-info
@@ -264,7 +254,7 @@ export function getPartsByZone(vehicle: Vehicle, now: Date): ZoneGroup[] {
     groups.set(item.cat.zone, list)
   }
 
-  // How far through its active clock a zone's worst known part is — drives area ordering.
+  // How far through its active clock a zone's worst known part is - drives area ordering.
   const worstFraction = new Map<PartZone, number>()
   const result: ZoneGroup[] = []
   for (const [zone, items] of groups) {

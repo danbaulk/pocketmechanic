@@ -5,7 +5,6 @@ import {
   effectiveInspection,
   estimateCurrentMileage,
   getPartsByZone,
-  getPartsWithHealth,
   vehicleWorstRag,
 } from './health.ts'
 import type { FittedPart, HistoryEntry, Vehicle } from './types.ts'
@@ -352,25 +351,6 @@ describe('getPartsByZone', () => {
     expect(front.parts.map((p) => p.part.id)).toEqual(['pads', 'discs'])
 
     expect(zones[2].worstRag).toBeNull() // Windscreen: only a needs-info part
-  })
-})
-
-describe('getPartsWithHealth', () => {
-  it('splits known/needs-info and sorts known by most-consumed first', () => {
-    const v: Vehicle = {
-      id: 'v', make: 'A', model: 'B', year: 2018,
-      lastReadingMiles: 80_000, lastReadingDate: '2026-07-04', avgAnnualMiles: 0,
-      parts: [
-        { id: 'a', catalogueId: 'brake-pads-front', fitDate: '2026-01-01', fitMileage: 78_000 }, // ~7% used
-        { id: 'b', catalogueId: 'brake-pads-front', fitDate: '2020-01-01', fitMileage: 55_000 }, // ~83% used
-        { id: 'c', catalogueId: 'brake-pads-front', fitDate: null, fitMileage: null }, // needs info
-        { id: 'd', catalogueId: 'not-a-real-part', fitDate: '2026-01-01', fitMileage: 78_000 }, // dropped
-      ],
-      history: [],
-    }
-    const { known, needsInfo } = getPartsWithHealth(v, NOW)
-    expect(known.map((k) => k.part.id)).toEqual(['b', 'a'])
-    expect(needsInfo.map((k) => k.part.id)).toEqual(['c'])
   })
 })
 
