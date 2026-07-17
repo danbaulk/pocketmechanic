@@ -9,6 +9,7 @@ const KIND_BADGE: Record<HistoryKind, string> = {
   service: 'bg-sky-50 text-sky-700 ring-sky-200',
   mot: 'bg-violet-50 text-violet-700 ring-violet-200',
   repair: 'bg-orange-50 text-orange-700 ring-orange-200',
+  inspection: 'bg-teal-50 text-teal-700 ring-teal-200',
   replacement: 'bg-emerald-50 text-emerald-700 ring-emerald-200',
   reading: 'bg-slate-100 text-slate-600 ring-slate-200',
 }

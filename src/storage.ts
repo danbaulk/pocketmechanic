@@ -2,7 +2,7 @@ import type { AppState, HistoryEntry, Vehicle } from './types.ts'
 import { originalFitment } from './health.ts'
 
 const STORAGE_KEY = 'pocketmechanic:state'
-const CURRENT_VERSION = 3 as const
+const CURRENT_VERSION = 4 as const
 
 export function defaultState(): AppState {
   return { version: CURRENT_VERSION, vehicles: [], activeVehicleId: null }
@@ -51,6 +51,10 @@ const MIGRATIONS: Record<number, (blob: StoredBlob) => StoredBlob> = {
       }),
     })),
   }),
+  // v3 → v4: entries may now carry `checkedRefs` (parts inspected and passed) and the
+  // `inspection` kind. Both are additive and optional, so v3 data is already valid v4 -
+  // the step exists to record the shape change, not to transform anything.
+  3: (blob) => ({ ...blob, version: 4 }),
 }
 
 function asStoredBlob(parsed: unknown): StoredBlob | null {

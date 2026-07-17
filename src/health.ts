@@ -8,6 +8,13 @@ import { latestByDate } from './history.ts'
  */
 export const AMBER_THRESHOLD = 0.9
 
+/**
+ * How much extra life a passed inspection buys a part, as a fraction of its own interval.
+ * Scaling with the part keeps one rule for every part: a garage saying the pads are fine
+ * means something different on a 25,000-mile interval than on a 70,000-mile one.
+ */
+export const INSPECTION_EXTENSION = 0.25
+
 const MS_PER_DAY = 1000 * 60 * 60 * 24
 const DAYS_PER_YEAR = 365.25
 
@@ -43,6 +50,34 @@ export function effectiveFitment(
 }
 
 /**
+ * The passed inspection currently vouching for a part, derived from history: the most recent
+ * entry that checked it (the shared `latestByDate` rule). Only entries carrying a mileage
+ * qualify, since the extension is measured from the odometer at the check.
+ *
+ * The inspection must *strictly* post-date `fitDate` - the part's effective fitment. Anything
+ * dated at or before it inspected the part that was on the car then, not this one: a part
+ * replaced the same day it was looked at makes the check moot, and a part in both lists of one
+ * entry is a replacement, not a check. Without the strict test an old inspection would lie
+ * dormant and then vouch for a fresh part years later, once that part wore far enough for
+ * `computePartHealth` to consult it.
+ */
+export function effectiveInspection(
+  part: FittedPart,
+  history: HistoryEntry[],
+  fitDate: string | null,
+): { date: string; mileage: number } | null {
+  const checks = history.filter(
+    (h): h is HistoryEntry & { mileage: number } =>
+      h.mileage !== null && (h.checkedRefs?.some((r) => r.partId === part.id) ?? false),
+  )
+  const best = latestByDate(checks, (h) => h.date)
+  if (best === null) return null
+  // An explicit null test: `'2026-01-01' > null` compares numerically and is silently false.
+  if (fitDate !== null && best.date <= fitDate) return null
+  return { date: best.date, mileage: best.mileage }
+}
+
+/**
  * Estimate the vehicle's current odometer ("electricity-meter" model): the last
  * actual reading plus average annual mileage projected over the days since.
  * Never estimates backwards below the last actual reading.
@@ -53,16 +88,52 @@ export function estimateCurrentMileage(v: Vehicle, now: Date): number {
   return Math.max(v.lastReadingMiles, Math.round(projected))
 }
 
-export type PartHealth = {
-  /** false when fit info is missing — the part renders as "needs info", no RAG. */
-  known: boolean
-  /** Consumed fraction of life (max of the mileage and age clocks). 0 = new, ≥1 = due. */
+/**
+ * How far through a mileage/age pair of clocks something is, the soonest of the two winning.
+ * A part missing one of the two intervals is judged on the other alone: an absent interval
+ * scores `-Infinity` so it can never win, and contributes no "remaining" figure.
+ */
+export type Clock = {
+  /** Consumed fraction: 0 = fresh, ≥1 = run out. */
   fraction: number
-  rag: RAG
-  /** Which clock is closest to end-of-life. */
+  /** Which of the two is closest to running out. */
   driver: 'mileage' | 'age'
   milesRemaining?: number
   daysRemaining?: number
+}
+
+function computeClock(
+  milesUsed: number,
+  yearsUsed: number,
+  mileageInterval: number | undefined,
+  ageYears: number | undefined,
+): Clock {
+  const fractionMiles = mileageInterval ? milesUsed / mileageInterval : -Infinity
+  const fractionAge = ageYears ? yearsUsed / ageYears : -Infinity
+
+  const clock: Clock = {
+    fraction: Math.max(fractionMiles, fractionAge),
+    driver: fractionMiles >= fractionAge ? 'mileage' : 'age',
+  }
+  if (mileageInterval) clock.milesRemaining = Math.round(mileageInterval - milesUsed)
+  if (ageYears) clock.daysRemaining = Math.round((ageYears - yearsUsed) * DAYS_PER_YEAR)
+  return clock
+}
+
+export type PartHealth = {
+  /** false when fit info is missing - the part renders as "needs info", no RAG. */
+  known: boolean
+  /** The signal to show. Reads the active clock (see `inspected`). */
+  rag: RAG
+  /** The part's wear against its nominal life. Always its real wear, inspected or not. */
+  wear: Clock
+  /**
+   * Set when a passed inspection has extended this part's life: when it was checked, and the
+   * part's wear against that extended life. Its presence is what makes the extended clock the
+   * part's *active* clock in place of `wear` - so `rag` and display order read it, while `wear`
+   * still tells the truth about how far past its usual interval the part is.
+   */
+  inspected?: { date: string; mileage: number; extended: Clock }
 }
 
 function ragFor(fraction: number): RAG {
@@ -71,38 +142,61 @@ function ragFor(fraction: number): RAG {
   return 'green'
 }
 
+/** The clock that drives a part's signal and display order: its extended life if inspected, else its wear. */
+export function activeClock(health: PartHealth): Clock {
+  return health.inspected ? health.inspected.extended : health.wear
+}
+
+/** The fraction of the part's active clock. */
+function urgency(health: PartHealth): number {
+  return activeClock(health).fraction
+}
+
 /**
- * Compute a fitted part's health against the current mileage and date, using the
- * soonest of its mileage and age clocks. A part with unrecorded fitment is `known:
- * false` (we can't judge its wear yet).
+ * Compute a fitted part's health against the current mileage and date, using the soonest of
+ * its mileage and age clocks. A part with unrecorded fitment is `known: false` (we can't judge
+ * its wear yet).
+ *
+ * A passed `inspection` (from `effectiveInspection`) extends the part's life: a garage has
+ * looked at a part we'd otherwise flag and said it isn't done yet. What it vouches for is the
+ * part *as it stood that day*, so each clock is extended to where it had got to at the check
+ * plus a further `INSPECTION_EXTENSION` of the part's interval - buying the same amount of
+ * life whenever it's checked, and letting a later re-check buy more. The part then wears
+ * through that extended life and reds normally; nothing about the extension is temporary.
+ * `wear` still measures the nominal interval, so the readout can stay candid about a part
+ * that's well past it.
+ *
+ * An inspection of a part we *aren't* flagging (wear below amber) is left as a plain timeline
+ * record: extending the life of a healthy part would redraw it as fresher than it is.
  */
 export function computePartHealth(
   part: FittedPart,
   cat: CataloguePart,
   currentMileage: number,
   now: Date,
+  inspection?: { date: string; mileage: number } | null,
 ): PartHealth {
   if (part.fitDate === null || part.fitMileage === null) {
-    return { known: false, fraction: 0, rag: 'green', driver: 'mileage' }
+    return { known: false, rag: 'green', wear: { fraction: 0, driver: 'mileage' } }
   }
 
   const milesUsed = currentMileage - part.fitMileage
-  const fractionMiles = cat.mileageInterval ? milesUsed / cat.mileageInterval : -Infinity
-
   const yearsUsed = daysBetween(new Date(part.fitDate), now) / DAYS_PER_YEAR
-  const fractionAge = cat.ageYears ? yearsUsed / cat.ageYears : -Infinity
+  const wear = computeClock(milesUsed, yearsUsed, cat.mileageInterval, cat.ageYears)
 
-  const driver: 'mileage' | 'age' = fractionMiles >= fractionAge ? 'mileage' : 'age'
-  const fraction = Math.max(fractionMiles, fractionAge)
+  if (inspection && wear.fraction >= AMBER_THRESHOLD) {
+    const milesAtCheck = inspection.mileage - part.fitMileage
+    const yearsAtCheck = daysBetween(new Date(part.fitDate), new Date(inspection.date)) / DAYS_PER_YEAR
+    const extended = computeClock(
+      milesUsed,
+      yearsUsed,
+      cat.mileageInterval && milesAtCheck + cat.mileageInterval * INSPECTION_EXTENSION,
+      cat.ageYears && yearsAtCheck + cat.ageYears * INSPECTION_EXTENSION,
+    )
+    return { known: true, rag: ragFor(extended.fraction), wear, inspected: { ...inspection, extended } }
+  }
 
-  const health: PartHealth = { known: true, fraction, rag: ragFor(fraction), driver }
-  if (cat.mileageInterval) {
-    health.milesRemaining = Math.round(cat.mileageInterval - milesUsed)
-  }
-  if (cat.ageYears) {
-    health.daysRemaining = Math.round(cat.ageYears * DAYS_PER_YEAR - yearsUsed * DAYS_PER_YEAR)
-  }
-  return health
+  return { known: true, rag: ragFor(wear.fraction), wear }
 }
 
 export type PartWithHealth = {
@@ -118,34 +212,21 @@ function allPartsWithHealth(vehicle: Vehicle, now: Date): PartWithHealth[] {
   for (const part of vehicle.parts) {
     const cat = getCataloguePart(part.catalogueId)
     if (!cat) continue // catalogueId no longer in the catalogue (e.g. removed part)
-    // Health runs against the part's effective fitment (latest replacement job), not its
-    // originally-recorded one - so editing/deleting a job re-derives its parts' health.
+    // Health runs against the part's effective fitment (latest replacement job) and the
+    // inspection vouching for it, not its originally-recorded fitment - so editing/deleting
+    // a job re-derives its parts' health.
     const eff = effectiveFitment(part, vehicle.history)
-    out.push({ part, cat, health: computePartHealth({ ...part, ...eff }, cat, currentMileage, now) })
+    const inspection = effectiveInspection(part, vehicle.history, eff.fitDate)
+    out.push({ part, cat, health: computePartHealth({ ...part, ...eff }, cat, currentMileage, now, inspection) })
   }
   return out
 }
 
 /** Known parts sorted soonest-due first; then unknown-fitment parts sorted by name. */
 function sortForDisplay(items: PartWithHealth[]): PartWithHealth[] {
-  const known = items.filter((i) => i.health.known).sort((a, b) => b.health.fraction - a.health.fraction)
+  const known = items.filter((i) => i.health.known).sort((a, b) => urgency(b.health) - urgency(a.health))
   const needsInfo = items.filter((i) => !i.health.known).sort((a, b) => a.cat.name.localeCompare(b.cat.name))
   return [...known, ...needsInfo]
-}
-
-/**
- * Every fitted part split into parts with known fitment (sorted soonest-due first) and
- * parts still needing info. Parts whose catalogueId is unknown are dropped.
- */
-export function getPartsWithHealth(
-  vehicle: Vehicle,
-  now: Date,
-): { known: PartWithHealth[]; needsInfo: PartWithHealth[] } {
-  const all = allPartsWithHealth(vehicle, now)
-  return {
-    known: all.filter((i) => i.health.known).sort((a, b) => b.health.fraction - a.health.fraction),
-    needsInfo: all.filter((i) => !i.health.known).sort((a, b) => a.cat.name.localeCompare(b.cat.name)),
-  }
 }
 
 export type ZoneGroup = {
@@ -173,12 +254,12 @@ export function getPartsByZone(vehicle: Vehicle, now: Date): ZoneGroup[] {
     groups.set(item.cat.zone, list)
   }
 
-  // How far through life a zone's worst known part is — drives area ordering.
+  // How far through its active clock a zone's worst known part is - drives area ordering.
   const worstFraction = new Map<PartZone, number>()
   const result: ZoneGroup[] = []
   for (const [zone, items] of groups) {
     const knownItems = items.filter((i) => i.health.known)
-    worstFraction.set(zone, knownItems.reduce((m, i) => Math.max(m, i.health.fraction), -Infinity))
+    worstFraction.set(zone, knownItems.reduce((m, i) => Math.max(m, urgency(i.health)), -Infinity))
     result.push({
       zone,
       parts: sortForDisplay(items),

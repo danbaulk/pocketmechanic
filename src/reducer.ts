@@ -18,14 +18,28 @@ export type NewVehicle = {
   avgAnnualMiles: number
 }
 
+/** The history kinds a user can log directly (`reading` is system-made; `replacement` is legacy). */
+export type JobKind = 'service' | 'mot' | 'repair' | 'inspection'
+
+/** The parts a job touched: `partIds` were replaced, `checkedPartIds` were checked and passed. */
+type JobFields = {
+  kind: JobKind
+  date: string
+  mileage: number | null
+  note?: string
+  motResult?: 'pass' | 'fail'
+  partIds?: string[]
+  checkedPartIds?: string[]
+}
+
 export type Action =
   | { type: 'addVehicle'; vehicle: NewVehicle }
   | { type: 'updateVehicle'; id: string; patch: Partial<Pick<Vehicle, 'make' | 'model' | 'year' | 'reg' | 'avgAnnualMiles'>> }
   | { type: 'deleteVehicle'; id: string }
   | { type: 'setActiveVehicle'; id: string }
   | { type: 'recordReading'; vehicleId: string; miles: number; date: string }
-  | { type: 'addHistoryEntry'; vehicleId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
-  | { type: 'updateHistoryEntry'; vehicleId: string; entryId: string; kind: 'service' | 'mot' | 'repair'; date: string; mileage: number | null; note?: string; motResult?: 'pass' | 'fail'; partIds?: string[] }
+  | ({ type: 'addHistoryEntry'; vehicleId: string } & JobFields)
+  | ({ type: 'updateHistoryEntry'; vehicleId: string; entryId: string } & JobFields)
   | { type: 'removeHistoryEntry'; vehicleId: string; entryId: string }
   | { type: 'addPart'; vehicleId: string; catalogueId: string; fitDate: string | null; fitMileage: number | null }
   | { type: 'removePart'; vehicleId: string; partId: string }
@@ -60,10 +74,10 @@ function recomputeAnchor(v: Vehicle): Vehicle {
 }
 
 /**
- * Resolve the parts a job replaced into denormalised `PartRef`s. `prevRefs` (the entry's
+ * Resolve the parts a job touched into denormalised `PartRef`s. `prevRefs` (the entry's
  * existing refs, when editing) backstops a part since removed from the car: without it, editing
- * an entry would silently erase the record of what it replaced - the very thing denormalising
- * `catalogueId` exists to protect.
+ * an entry would silently erase the record of what it replaced or checked - the very thing
+ * denormalising `catalogueId` exists to protect.
  */
 function partRefsFor(v: Vehicle, partIds: string[] | undefined, prevRefs: PartRef[] = []): PartRef[] {
   if (!partIds?.length) return []
@@ -77,21 +91,21 @@ function partRefsFor(v: Vehicle, partIds: string[] | undefined, prevRefs: PartRe
   return refs
 }
 
-/** Build a service/MOT/repair history entry from job fields, denormalising its replaced parts. */
+/**
+ * Build a job history entry from its fields, denormalising the parts it replaced and checked.
+ * The two lists get their own `prevRefs` backstop. A part claimed as both replaced and checked
+ * is only replaced - fitting a new part subsumes any verdict on the old one.
+ */
 function buildJobEntry(
   v: Vehicle,
   id: string,
-  fields: {
-    kind: 'service' | 'mot' | 'repair'
-    date: string
-    mileage: number | null
-    note?: string
-    motResult?: 'pass' | 'fail'
-    partIds?: string[]
-  },
-  prevRefs?: PartRef[],
+  fields: JobFields,
+  prev?: { partRefs?: PartRef[]; checkedRefs?: PartRef[] },
 ): HistoryEntry {
-  const partRefs = partRefsFor(v, fields.partIds, prevRefs)
+  const partRefs = partRefsFor(v, fields.partIds, prev?.partRefs)
+  const checkedRefs = partRefsFor(v, fields.checkedPartIds, prev?.checkedRefs).filter(
+    (c) => !partRefs.some((p) => p.partId === c.partId),
+  )
   return {
     id,
     kind: fields.kind,
@@ -100,6 +114,7 @@ function buildJobEntry(
     ...(fields.note?.trim() ? { note: fields.note.trim() } : {}),
     ...(fields.motResult && fields.kind === 'mot' ? { motResult: fields.motResult } : {}),
     ...(partRefs.length ? { partRefs } : {}),
+    ...(checkedRefs.length ? { checkedRefs } : {}),
   }
 }
 
@@ -151,7 +166,7 @@ export function garageReducer(state: AppState, action: Action): AppState {
     case 'updateHistoryEntry':
       return updateVehicle(state, action.vehicleId, (v) => {
         const prev = v.history.find((h) => h.id === action.entryId)
-        const entry = buildJobEntry(v, action.entryId, action, prev?.partRefs)
+        const entry = buildJobEntry(v, action.entryId, action, prev)
         const history = v.history.map((h) => (h.id === action.entryId ? entry : h))
         return recomputeAnchor({ ...v, history })
       })

@@ -113,6 +113,23 @@ describe('entryDetail', () => {
     expect(entryDetail(entry)).toBe('Replaced: Front brake pads, Front brake discs · Passed · advisory: tyres')
   })
 
+  it('lists the checked parts', () => {
+    const entry: HistoryEntry = {
+      id: 'e', kind: 'inspection', date: '2026-01-01', mileage: 60_000,
+      checkedRefs: [{ partId: 'p1', catalogueId: 'brake-pads-front' }],
+    }
+    expect(entryDetail(entry)).toBe('Checked: Front brake pads')
+  })
+
+  it('distinguishes what a visit replaced from what it merely checked', () => {
+    const entry: HistoryEntry = {
+      id: 'e', kind: 'service', date: '2026-01-01', mileage: 60_000,
+      partRefs: [{ partId: 'p1', catalogueId: 'engine-oil' }],
+      checkedRefs: [{ partId: 'p2', catalogueId: 'brake-pads-front' }],
+    }
+    expect(entryDetail(entry)).toBe('Replaced: Engine oil & filter · Checked: Front brake pads')
+  })
+
   it('is null for a bare entry', () => {
     expect(entryDetail({ id: 'e', kind: 'service', date: '2026-01-01', mileage: 60_000 })).toBeNull()
   })
